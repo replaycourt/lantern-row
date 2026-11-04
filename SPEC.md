@@ -124,15 +124,15 @@ A wallet that buys a stall plays through `play`, signing its own transactions. A
 
 ## 12. API
 
-Numbers in JSON are plain numbers. They all stay below 2^53: balances cannot exceed the founding money, and nonces stop at 2^53 − 1.
+Numbers in JSON are plain numbers. They all stay below 2^53: balances cannot exceed the founding money, and nonces stop at 2^53 − 1. The NEP views keep the strings their standards require (`nft_total_supply`, `nft_payout`).
 
 ### 12.1 Write methods
 
 | method | who | gas to attach | returns |
 |---|---|---|---|
-| `act(player_pubkey, nonce, action, signature)` | anyone relaying | 30 Tgas | `ActOutcome` |
-| `play(action)` | an account signing for itself | 30 Tgas | `ActOutcome` |
-| `advance_night()` | anyone | 150 Tgas | `AdvanceOutcome` |
+| `act(player_pubkey, nonce, action, signature)` | anyone relaying | 20 Tgas (measured: 2.7 to 3.8) | `ActOutcome` |
+| `play(action)` | an account signing for itself | 20 Tgas | `ActOutcome` |
+| `advance_night()` | anyone | 60 Tgas (measured worst case: 15.4) | `AdvanceOutcome` |
 
 **Signing `act`.** `player_pubkey` and `signature` are lowercase hex. `action` is a string holding a JSON array of actions, at most 16 actions and 2,048 bytes. Sign the UTF-8 bytes of
 
@@ -263,3 +263,5 @@ Storage is paid by the contract's own balance, and players never attach any. Eve
 - **Griefing.** Someone with many keys can take the licences: at most 4 a night and 100 in total, and then nobody can found a stall. Stalls idle for 60 nights give up their spot on the row, but the licence stays used. Someone can also fill an account's 8 stall slots by sending it stalls.
 - **The account register** holds 400 accounts and nobody can be removed. After that, tokens can only move between accounts already on it.
 - **Merchants depend on relief** when players out-trade them. See [docs/ECONOMY.md](docs/ECONOMY.md).
+- **The town only moves when someone calls `advance_night`.** With nobody around it stands still, and the next call simulates up to 30 nights. Clients do this, so the world is as alive as its visitors.
+- **The rules are final for this deployment.** A wrong number stays wrong. Fixing it means a new deployment under a new account, with a new world.
