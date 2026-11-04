@@ -1,7 +1,7 @@
 //! The economy simulation: bots drive the real contract through the mock VM for hundreds of nights.
 //!
 //! Run with the tables printed: `cargo test --test economy_sim -- --nocapture --test-threads=1`
-//! The evidence these tables produced, and the tuning it led to, is in docs/ECONOMY.md.
+//! What these tables say, and the tuning they led to, is in docs/ECONOMY.md.
 mod common;
 
 use common::*;
@@ -17,14 +17,22 @@ enum Strategy {
     Passive,
     /// Refills the same mix at fixed fair prices every night. No thought at all, but always there.
     Restocker,
-    /// What an attentive player does: adjusts prices to what sold, reads the forecast, reinvests.
+    /// Refills like the Restocker but at a fixed percentage of the fair price.
+    Fixed(u32),
+    /// Fixed price, and reinvests until it reaches a given spot and size.
+    Investor(u32, u8, u8),
+    /// What an attentive player does: prices against rivals, reads the forecast, reinvests.
     Trader,
+    /// The same pricing, but ignores the forecast and never reinvests.
+    Watcher,
     /// Always the cheapest on the row, as low as the Dock allows.
     Undercutter,
     /// Stocks everything and asks two and a half times the fair price.
     Gouger,
     /// Buys all of one good the Dock has every night and asks double, trying to corner the market.
     Cornerer(usize),
+    /// Buys all of one good every night and sells it barely above cost: a glut on purpose.
+    Flooder(usize),
     /// Spends everything on the best spot straight away, then restocks like the Restocker.
     FrontRunner,
     /// Sells only dumplings, the cheap everyday good, at a thin margin.
@@ -33,10 +41,11 @@ enum Strategy {
     SilkOnly,
 }
 
-const ALL: [Strategy; 9] = [
+const ALL: [Strategy; 10] = [
     Strategy::Passive,
     Strategy::Restocker,
     Strategy::Trader,
+    Strategy::Watcher,
     Strategy::Undercutter,
     Strategy::Gouger,
     Strategy::Cornerer(3),
@@ -50,7 +59,6 @@ struct Bot {
     stall: u32,
     strategy: Strategy,
     started: bool,
-    ask: [u32; GOODS],
 }
 
 const MIX: [u32; GOODS] = [8, 5, 10, 2, 3];
@@ -103,61 +111,64 @@ fn restock_at(w: &WorldView, s: &StallView, targets: [u32; GOODS], prices: [u32;
     acts
 }
 
-/// What an attentive player does each night: looks at what sold, not just at the rivals. Sold a good
-/// part of the stock: asks more. Sold nothing: asks less. Reads the forecast and buys ahead of it.
-fn trader(w: &WorldView, s: &StallView, ask: &mut [u32; GOODS]) -> Vec<String> {
+/// What an attentive player does each night: prices just under the cheapest rival while that still
+/// pays, never lets the shelf run empty, reads the forecast and buys ahead of it. With `invest` it also
+/// reinvests its profit, and with `events` it reacts to the forecast.
+fn trader(w: &WorldView, s: &StallView, events: bool, invest: bool) -> Vec<String> {
     let mut targets = [0; GOODS];
     let mut prices = [0; GOODS];
     let scale = s.tier as u32 + 1;
     for g in 0..GOODS {
         let unit = w.dock[g].price;
-        let sold = s.sold_last[g] as u32;
-        if ask[g] == 0 {
-            // Opening price: enough under the merchants to win customers they know.
-            let rival = rival_price(w, s.id, g).unwrap_or(FAIR[g]);
-            ask[g] = rival * 92 / 100;
-        } else if s.stock[g] == 0 || sold * 3 >= s.stock[g] + sold {
-            ask[g] = ask[g] * 105 / 100 + 1;
-        } else if sold == 0 {
-            ask[g] = ask[g] * 95 / 100;
-        }
-        ask[g] = ask[g].clamp(unit * 120 / 100, FAIR[g] * 2);
-        let festival_next = matches!(w.event_next, Event::Festival { good } if good as usize == g);
-        let festival_now = matches!(w.event, Event::Festival { good } if good as usize == g);
-        let storm_next = matches!(w.event_next, Event::Storm { good } if good as usize == g);
-        let storm_now = matches!(w.event, Event::Storm { good } if good as usize == g);
-        let mut p = ask[g];
-        if festival_now {
-            p = p * 125 / 100;
-        }
-        if storm_now {
-            p = p * 115 / 100;
+        // Under the cheapest rival, but it does not join a race to the bottom: below the fair price
+        // it just holds, and lets the bargain stalls run out.
+        let rival = rival_price(w, s.id, g).map_or(FAIR[g] * 140 / 100, |r| r * 97 / 100);
+        let floor = (unit * 125 / 100).max(FAIR[g] * 95 / 100);
+        let mut p = rival.clamp(floor, (FAIR[g] * 140 / 100).max(floor));
+        let mut target = MIX[g] * (1 + (scale - 1) / 2);
+        if events {
+            let soon = w.event_left == 1;
+            let festival_next = soon && matches!(w.event_next, Event::Festival { good } if good as usize == g);
+            let festival_now = matches!(w.event, Event::Festival { good } if good as usize == g);
+            let storm_next = soon && matches!(w.event_next, Event::Storm { good } if good as usize == g);
+            let storm_now = matches!(w.event, Event::Storm { good } if good as usize == g);
+            if festival_now {
+                p = p * 125 / 100;
+            }
+            if storm_now {
+                p = p * 130 / 100;
+            }
+            if festival_next {
+                target *= 2;
+            } else if storm_next {
+                target = target * 3 / 2;
+            }
         }
         prices[g] = p;
-        let mut target = MIX[g] * scale;
-        if festival_next {
-            target *= 2;
-        } else if storm_next {
-            target = target * 3 / 2;
-        }
         if unit * 110 / 100 < p {
             targets[g] = target;
         }
     }
     let mut acts = restock_at(w, s, targets, prices, 40);
-    // Reinvest when flush: first a better spot, then a bigger stall.
+    if !invest {
+        return acts;
+    }
+    // Reinvest when flush: a bigger stall once customers are being turned away, and a free spot around
+    // the middle of the row. The front is rarely worth its fee and rent, and displacing costs double.
     if s.listed.is_none() {
-        let here = s.spot.unwrap_or(ROW_SPOTS as u8);
-        if here > 2 && w.night >= s.moved_at + MOVE_COOLDOWN_NIGHTS {
-            let target = here.saturating_sub(4);
-            let occupied = w.row.iter().any(|x| x.spot == Some(target));
-            let fee = spot_fee(target) * if occupied { DISPLACE_FACTOR } else { 1 };
-            if s.money > fee * 4 {
-                acts.push(format!(r#"{{"move":{{"stall":{},"spot":{target},"max_fee":{fee}}}}}"#, s.id));
-            }
-        }
-        if (s.tier as usize) + 1 < TIERS && s.money > TIER_COST[s.tier as usize + 1] * 2 {
+        let sold: u32 = s.sold_last.iter().map(|&x| x as u32).sum();
+        if (s.tier as usize) + 1 < TIERS && sold >= s.service && s.money > TIER_COST[s.tier as usize + 1] * 3 / 2 {
             acts.push(format!(r#"{{"upgrade":{{"stall":{},"max_cost":1000000}}}}"#, s.id));
+        }
+        let here = s.spot.unwrap_or(ROW_SPOTS as u8);
+        if here > 10 && (s.moved_at == 0 || w.night >= s.moved_at + MOVE_COOLDOWN_NIGHTS) {
+            let free = (10..here).find(|&x| !w.row.iter().any(|r| r.spot == Some(x)));
+            if let Some(target) = free {
+                let fee = spot_fee(target);
+                if s.money > fee * 3 {
+                    acts.push(format!(r#"{{"move":{{"stall":{},"spot":{target},"max_fee":{fee}}}}}"#, s.id));
+                }
+            }
         }
     }
     acts
@@ -175,7 +186,29 @@ fn turn(g: &mut Game, b: &mut Bot, w: &WorldView) {
             }
         }
         Strategy::Restocker => restock_at(w, &s, MIX, FAIR, 40),
-        Strategy::Trader => trader(w, &s, &mut b.ask),
+        Strategy::Fixed(pct) => {
+            let prices = core::array::from_fn(|good| FAIR[good] * pct / 100);
+            restock_at(w, &s, MIX, prices, 40)
+        }
+        Strategy::Investor(pct, spot, tier) => {
+            let prices = core::array::from_fn(|good| FAIR[good] * pct / 100);
+            let scale = 1 + s.tier as u32 / 2;
+            let mut acts = restock_at(w, &s, core::array::from_fn(|good| MIX[good] * scale), prices, 40);
+            let here = s.spot.unwrap_or(ROW_SPOTS as u8);
+            if here > spot {
+                let occupied = w.row.iter().any(|x| x.spot == Some(spot));
+                let fee = spot_fee(spot) * if occupied { DISPLACE_FACTOR } else { 1 };
+                if s.money > fee * 3 / 2 && (s.moved_at == 0 || w.night >= s.moved_at + MOVE_COOLDOWN_NIGHTS) {
+                    acts.push(format!(r#"{{"move":{{"stall":{id},"spot":{spot},"max_fee":{fee}}}}}"#));
+                }
+            }
+            if s.tier < tier && s.money > TIER_COST[s.tier as usize + 1] * 3 / 2 {
+                acts.push(format!(r#"{{"upgrade":{{"stall":{id},"max_cost":1000000}}}}"#));
+            }
+            acts
+        }
+        Strategy::Trader => trader(w, &s, true, true),
+        Strategy::Watcher => trader(w, &s, false, false),
         Strategy::Undercutter => {
             let mut prices = [0; GOODS];
             for good in 0..GOODS {
@@ -196,6 +229,15 @@ fn turn(g: &mut Game, b: &mut Bot, w: &WorldView) {
                 acts.push(buy(id, good, q));
             }
             acts.push(price(id, good, FAIR[good] * 2));
+            acts
+        }
+        Strategy::Flooder(good) => {
+            let mut acts = Vec::new();
+            let q = qty_for(w, good, w.dock[good].left, s.capacity.saturating_sub(held(&s)), s.money);
+            if q > 0 {
+                acts.push(buy(id, good, q));
+            }
+            acts.push(price(id, good, w.dock[good].price * 105 / 100));
             acts
         }
         Strategy::FrontRunner => {
@@ -226,6 +268,11 @@ fn turn(g: &mut Game, b: &mut Bot, w: &WorldView) {
         }
     };
     b.started = true;
+    let mut acts = acts;
+    // A stall nobody touches for 60 nights loses its spot. A player who is still there touches it.
+    if acts.is_empty() && b.strategy != Strategy::Passive && w.night % 20 == 0 {
+        acts.push(price(id, 0, s.price[0]));
+    }
     if acts.is_empty() {
         return;
     }
@@ -311,7 +358,7 @@ fn make_bots(g: &mut Game, plan: &[Strategy]) -> Vec<Bot> {
         let who = acc(&format!("bot{i}.testnet"));
         let name: String = format!("{strategy:?}").chars().filter(char::is_ascii_alphanumeric).take(MAX_NAME_CHARS).collect();
         let stall = g.found(&who, &name);
-        bots.push(Bot { who, stall, strategy, started: false, ask: [0; GOODS] });
+        bots.push(Bot { who, stall, strategy, started: false });
     }
     bots
 }
@@ -322,6 +369,10 @@ fn run(g: &mut Game, bots: &mut [Bot], nights: u32, label: &str, print_every: u3
     let mut window = Stats::new();
     for n in 1..=nights {
         let w = g.world();
+        // The Dock serves whoever comes first, so nobody may always come first.
+        if !bots.is_empty() {
+            bots.rotate_left(1);
+        }
         for b in bots.iter_mut() {
             turn(g, b, &w);
         }
@@ -338,6 +389,8 @@ fn run(g: &mut Game, bots: &mut [Bot], nights: u32, label: &str, print_every: u3
         }
     }
     g.assert_conserved();
+    // Back in the order the caller planned.
+    bots.sort_by_key(|b| b.stall);
     stats
 }
 
@@ -379,6 +432,37 @@ fn a_judge_alone_for_two_minutes_meets_a_living_market() {
 }
 
 #[test]
+fn a_judge_arriving_late_can_still_break_in() {
+    println!("\nthe town has run alone for 600 nights when one attentive player arrives");
+    let mut profits = Vec::new();
+    for seed in 1..=8 {
+        let mut g = Game::with_seed(5000 + seed);
+        for _ in 0..600 {
+            g.next_night();
+        }
+        let merchants_rep: Vec<u16> = (1..=MERCHANTS).map(|id| g.stall(id).rep).collect();
+        let mut bots = make_bots(&mut g, &[Strategy::Trader]);
+        let start = worth_of(&mut g, bots[0].stall);
+        let mut line = String::new();
+        for _ in 0..6 {
+            let w = g.world();
+            turn(&mut g, &mut bots[0], &w);
+            g.next_night();
+            let w = g.world();
+            let log = w.last.as_ref().unwrap();
+            let mine = log.sales.iter().filter(|s| s.1 == bots[0].stall).count();
+            line.push_str(&format!("{mine}/{} ", log.sales.len()));
+        }
+        let end = worth_of(&mut g, bots[0].stall);
+        println!("seed {seed}: merchants' rep {merchants_rep:?}; my sales/all {line}| worth {start} -> {end}");
+        profits.push(end as i64 - start as i64);
+    }
+    println!("profits over six nights: {profits:?}");
+    let wins = profits.iter().filter(|&&p| p > 0).count();
+    assert!(wins >= 6, "a newcomer in an old town should usually profit quickly: {profits:?}");
+}
+
+#[test]
 fn the_town_alone_stays_alive_for_two_thousand_nights() {
     println!("\nno players at all");
     let mut g = Game::with_seed(100);
@@ -412,17 +496,12 @@ fn league(seed: u64, nights: u32, print_every: u32) -> Vec<(Strategy, u64)> {
 }
 
 #[test]
-fn nine_strategies_over_a_thousand_nights_and_no_trivial_one_dominates() {
-    println!("\nnine strategies on one row, 1000 nights, 6 seeds");
+fn ten_strategies_over_a_thousand_nights_and_the_one_trick_ones_lose() {
+    println!("\nten strategies on one row, 1000 nights, 6 seeds");
     let mut totals = [0u64; ALL.len()];
     let seeds = 6;
-    let mut trader_first = 0;
     for seed in 1..=seeds {
         let results = league(seed, 1_000, if seed == 1 { 200 } else { 0 });
-        let best = results.iter().max_by_key(|r| r.1).unwrap();
-        if best.0 == Strategy::Trader {
-            trader_first += 1;
-        }
         for (i, r) in results.iter().enumerate() {
             totals[i] += r.1;
         }
@@ -434,24 +513,86 @@ fn nine_strategies_over_a_thousand_nights_and_no_trivial_one_dominates() {
         println!("  {:<12} {:>8}", format!("{s:?}"), totals[i] / seeds);
     }
     let avg = |s: Strategy| totals[ALL.iter().position(|&x| x == s).unwrap()] / seeds;
-    println!("trader finished first in {trader_first}/{seeds} seeds");
-    assert!(avg(Strategy::Trader) > avg(Strategy::Passive) * 2, "attention must pay");
-    assert!(avg(Strategy::Trader) > avg(Strategy::Restocker), "thinking must beat refilling");
-    for trivial in [
-        Strategy::Gouger,
-        Strategy::Cornerer(3),
-        Strategy::Undercutter,
-        Strategy::FrontRunner,
-        Strategy::Dumplings,
-        Strategy::SilkOnly,
-    ] {
-        assert!(
-            avg(Strategy::Trader) > avg(trivial),
-            "{trivial:?} ({}) beats the attentive Trader ({})",
-            avg(trivial),
-            avg(Strategy::Trader)
-        );
+    // Paying attention every night beats doing nothing, by a wide margin.
+    for attentive in [Strategy::Trader, Strategy::Watcher, Strategy::Restocker] {
+        assert!(avg(attentive) > avg(Strategy::Passive) * 5, "{attentive:?} should far outearn Passive");
     }
+    // Each one-trick idea loses to plain market-watching, and the attentive player beats them all.
+    for trick in [Strategy::Gouger, Strategy::Undercutter, Strategy::Dumplings, Strategy::SilkOnly, Strategy::Cornerer(3), Strategy::FrontRunner, Strategy::Restocker] {
+        assert!(avg(trick) < avg(Strategy::Watcher), "{trick:?} ({}) beats watching the market", avg(trick));
+    }
+    for other in ALL.iter().filter(|&&s| s != Strategy::Trader) {
+        assert!(avg(Strategy::Trader) > avg(*other), "{other:?} ({}) beats the Trader ({})", avg(*other), avg(Strategy::Trader));
+    }
+}
+
+/// Average net worth of a fixed price level over a few seeds: alone with the merchants, and in the league.
+fn fixed_level(pct: u32) -> (u64, u64) {
+    let (mut alone, mut in_league) = (0, 0);
+    for seed in 1..=4 {
+        let mut g = Game::with_seed(seed);
+        let mut bots = make_bots(&mut g, &[Strategy::Fixed(pct)]);
+        run(&mut g, &mut bots, 500, "fixed", 0);
+        alone += g.stall(bots[0].stall).worth;
+        let mut g = Game::with_seed(seed + 100);
+        let mut plan = ALL.to_vec();
+        plan[1] = Strategy::Fixed(pct);
+        let mut bots = make_bots(&mut g, &plan);
+        run(&mut g, &mut bots, 500, "fixed", 0);
+        in_league += g.stall(bots[1].stall).worth;
+    }
+    (alone / 4, in_league / 4)
+}
+
+/// Refilling at a fixed price is the obvious simple play, so it gets its own scrutiny. It is not a
+/// solved game: the best level depends on who else is on the row, and overshooting is punished hard.
+#[test]
+fn no_fixed_price_is_right_everywhere() {
+    println!("\nnet worth after 500 nights at a fixed price level");
+    println!("{:>7} {:>9} {:>9}", "price%", "alone", "league");
+    let levels = [70, 80, 90, 100, 110, 120, 130, 140, 150, 170, 200];
+    let results: Vec<(u32, u64, u64)> = levels.iter().map(|&pct| {
+        let (a, l) = fixed_level(pct);
+        println!("{pct:>7} {a:>9} {l:>9}");
+        (pct, a, l)
+    }).collect();
+    let best_alone = results.iter().max_by_key(|r| r.1).unwrap();
+    let best_league = results.iter().max_by_key(|r| r.2).unwrap();
+    println!("best alone at {}%, best in the league at {}%", best_alone.0, best_league.0);
+    assert!(best_alone.0 > best_league.0, "competition should push the best price down");
+    let at_alone_best = results.iter().find(|r| r.0 == best_alone.0).unwrap().2;
+    assert!(at_alone_best * 2 < best_league.2, "the price that is best alone should fail in a crowd");
+    let extremes = [results[0], *results.last().unwrap()];
+    for e in extremes {
+        assert!(e.1 * 2 < best_alone.1, "{}% should be far from the best", e.0);
+    }
+}
+
+#[test]
+fn an_attentive_player_outplays_fixed_price_refilling() {
+    println!("\nthe attentive Trader against the best fixed level and against a field of refillers");
+    let (best_alone, _) = fixed_level(140);
+    let mut trader_alone = 0;
+    for seed in 1..=4 {
+        let mut g = Game::with_seed(seed);
+        let mut bots = make_bots(&mut g, &[Strategy::Trader]);
+        run(&mut g, &mut bots, 500, "alone", 0);
+        trader_alone += g.stall(bots[0].stall).worth;
+    }
+    trader_alone /= 4;
+    println!("alone with the merchants, 500 nights: Trader {trader_alone}, best fixed level {best_alone}");
+    assert!(trader_alone > best_alone, "Trader {trader_alone} vs fixed {best_alone}");
+    let (mut trader_field, mut refill_field) = (0, 0);
+    for seed in 1..=4 {
+        let mut g = Game::with_seed(seed + 200);
+        let plan = [Strategy::Restocker, Strategy::Restocker, Strategy::Restocker, Strategy::Restocker, Strategy::Trader];
+        let mut bots = make_bots(&mut g, &plan);
+        run(&mut g, &mut bots, 500, "field", 0);
+        trader_field += g.stall(bots[4].stall).worth;
+        refill_field += (0..4).map(|i| g.stall(bots[i].stall).worth).sum::<u64>() / 4;
+    }
+    println!("four refillers and one Trader, 500 nights: Trader {}, refillers on average {}", trader_field / 4, refill_field / 4);
+    assert!(trader_field > refill_field, "the Trader should beat a field of refillers");
 }
 
 #[test]
@@ -532,8 +673,113 @@ fn money_does_not_pool_in_one_place() {
     let mut bots = make_bots(&mut g, &ALL);
     run(&mut g, &mut bots, 1_000, "pool", 0);
     let a = g.audit();
-    println!("\nwhere the coin is after 1000 nights of nine strategies: {a:?}");
+    println!("\nwhere the coin is after 1000 nights of ten strategies: {a:?}");
     assert!(a.treasury * 100 / FOUNDING_MONEY >= 20, "the treasury holds too little");
     let top = bots.iter().map(|b| g.stall(b.stall).money).max().unwrap();
     assert!(top * 100 / FOUNDING_MONEY < 15, "one stall holds {top}");
+}
+
+/// Average price the NPC merchants ask for a good, and how often villagers found none, while `plan` plays.
+fn merchant_price(plan: &[Strategy], good: usize, seed: u64) -> (f64, f64) {
+    let mut g = Game::with_seed(seed);
+    let mut bots = make_bots(&mut g, plan);
+    run(&mut g, &mut bots, 100, "warmup", 0);
+    let (mut sum, mut count, mut missed) = (0u64, 0u64, 0u64);
+    for _ in 0..300 {
+        let w = g.world();
+        for b in bots.iter_mut() {
+            turn(&mut g, b, &w);
+        }
+        g.next_night();
+        let w = g.world();
+        for s in w.row.iter().filter(|s| s.npc && MERCHANT_TABLE[s.id as usize - 1].target[good] > 0) {
+            sum += s.price[good] as u64;
+            count += 1;
+        }
+        missed += w.last.as_ref().unwrap().missed.iter().filter(|m| m.1 as usize == good).count() as u64;
+    }
+    (sum as f64 / count.max(1) as f64, missed as f64 / 300.0)
+}
+
+#[test]
+fn scarcity_and_gluts_come_from_what_players_do() {
+    println!("\nwhat bots do to the merchants' prices, 300 nights after a warm-up");
+    println!("{:<10} {:>8} {:>18} {:>12} | missed/night {:>6} {:>8} {:>8}", "good", "alone", "6 cornerers", "1 flooder", "alone", "corner", "flood");
+    for good in 0..GOODS {
+        let (alone, missed_alone) = merchant_price(&[], good, 3000 + good as u64);
+        let (cornered, missed_cornered) = merchant_price(&[Strategy::Cornerer(good); 6], good, 3000 + good as u64);
+        let (flooded, missed_flooded) = merchant_price(&[Strategy::Flooder(good)], good, 3000 + good as u64);
+        println!(
+            "{:<10} {alone:>8.1} {cornered:>18.1} {flooded:>12.1} | {:>19.2} {missed_cornered:>8.2} {missed_flooded:>8.2}",
+            GOOD_NAMES[good], missed_alone
+        );
+        assert!(flooded < alone, "{}: a glut should lower prices: {flooded} vs {alone}", GOOD_NAMES[good]);
+    }
+}
+
+#[test]
+fn a_storm_shows_up_in_prices_and_empty_shelves() {
+    // Compares the nights with a storm on dumplings, the good nobody can hold much of, with the rest.
+    println!("\ndumplings during and outside storms, 3000 nights, no players");
+    let mut g = Game::with_seed(4100);
+    let (mut storm_nights, mut storm_missed, mut other_nights, mut other_missed) = (0u64, 0u64, 0u64, 0u64);
+    let (mut storm_dock, mut other_dock) = (0u64, 0u64);
+    let (mut storm_ask, mut other_ask) = (0u64, 0u64);
+    for _ in 0..3_000 {
+        let w = g.world();
+        let storm = matches!(w.event, Event::Storm { good: 2 });
+        let price = w.dock[2].price as u64;
+        let ask = w.row.iter().filter(|s| s.npc && s.price[2] > 0).map(|s| s.price[2] as u64).sum::<u64>() / 3;
+        if storm {
+            storm_ask += ask;
+        } else {
+            other_ask += ask;
+        }
+        g.next_night();
+        let w = g.world();
+        let missed = w.last.as_ref().unwrap().missed.iter().filter(|m| m.1 == 2).count() as u64;
+        if storm {
+            storm_nights += 1;
+            storm_missed += missed;
+            storm_dock += price;
+        } else {
+            other_nights += 1;
+            other_missed += missed;
+            other_dock += price;
+        }
+    }
+    let (sm, om) = (storm_missed as f64 / storm_nights as f64, other_missed as f64 / other_nights as f64);
+    let (sd, od) = (storm_dock as f64 / storm_nights as f64, other_dock as f64 / other_nights as f64);
+    println!("storm nights {storm_nights}: villagers without dumplings {sm:.2}/night, Dock price {sd:.1}, merchants ask {:.1}", storm_ask as f64 / storm_nights as f64);
+    println!("other nights {other_nights}: villagers without dumplings {om:.2}/night, Dock price {od:.1}, merchants ask {:.1}", other_ask as f64 / other_nights as f64);
+    assert!(sd > od * 1.3, "a storm should raise the Dock price");
+    assert!(sm > om * 1.5, "a storm should empty shelves: {sm} vs {om}");
+}
+
+/// What spending profit on spot and size brings.
+#[test]
+fn spending_profit_on_size_pays_and_a_spot_pays_in_a_crowd() {
+    println!("\nnet worth after 500 nights, by what the profit is spent on: at 120% of fair alone, at 90% in the league");
+    println!("{:>6} {:>6} {:>10} {:>10}", "spot", "size", "alone", "league");
+    let mut table = Vec::new();
+    for (spot, tier) in [(23u8, 0u8), (10, 0), (2, 0), (0, 0), (23, 1), (23, 2), (23, 3), (10, 1), (10, 2), (0, 2), (0, 3)] {
+        let (mut alone, mut league) = (0, 0);
+        for seed in 1..=4 {
+            let mut g = Game::with_seed(seed);
+            let mut bots = make_bots(&mut g, &[Strategy::Investor(120, spot, tier)]);
+            run(&mut g, &mut bots, 500, "invest", 0);
+            alone += g.stall(bots[0].stall).worth;
+            let mut g = Game::with_seed(seed + 100);
+            let mut plan = ALL.to_vec();
+            plan[1] = Strategy::Investor(90, spot, tier);
+            let mut bots = make_bots(&mut g, &plan);
+            run(&mut g, &mut bots, 500, "invest", 0);
+            league += g.stall(bots[1].stall).worth;
+        }
+        println!("{spot:>6} {tier:>6} {:>10} {:>10}", alone / 4, league / 4);
+        table.push((spot, tier, alone / 4, league / 4));
+    }
+    let at = |s: u8, t: u8| *table.iter().find(|r| r.0 == s && r.1 == t).unwrap();
+    assert!(at(23, 3).2 > at(23, 0).2 * 3 / 2, "the biggest stall should far outearn the smallest");
+    assert!(at(23, 1).3 > at(23, 0).3, "a size up should pay in a crowd too");
 }

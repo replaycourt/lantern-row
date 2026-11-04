@@ -112,15 +112,15 @@ fn sell_back_pays_less_than_the_stock_cost_and_cools_the_dock() {
     let mut g = Game::new();
     let me = acc("me.testnet");
     let id = g.found(&me, "Mine");
-    g.ok(&me, &format!(r#"[{{"buy":{{"stall":{id},"good":1,"qty":10,"max_cost":100000}}}}]"#));
+    g.ok(&me, &format!(r#"[{{"buy":{{"stall":{id},"good":1,"qty":5,"max_cost":100000}}}}]"#));
     let money = g.stall(id).money;
     let heat = g.world().dock[1].heat;
-    g.ok(&me, &format!(r#"[{{"sell_back":{{"stall":{id},"good":1,"qty":10,"min_pay":1}}}}]"#));
+    g.ok(&me, &format!(r#"[{{"sell_back":{{"stall":{id},"good":1,"qty":5,"min_pay":1}}}}]"#));
     let s = g.stall(id);
     assert_eq!(s.stock[1], 0);
     assert!(s.money > money);
     assert!(s.money < STARTER_GRANT, "a round trip must lose money");
-    assert_eq!(g.world().dock[1].heat, heat - 10);
+    assert_eq!(g.world().dock[1].heat, heat - 5);
     g.assert_conserved();
 }
 
@@ -130,7 +130,7 @@ fn villagers_buy_from_a_fair_stall_and_the_tax_goes_to_the_treasury() {
     let me = acc("me.testnet");
     let id = g.found(&me, "Mine");
     g.ok(&me, &format!(
-        r#"[{{"buy":{{"stall":{id},"good":2,"qty":20,"max_cost":100000}}}},{{"price":{{"stall":{id},"good":2,"price":20}}}}]"#
+        r#"[{{"buy":{{"stall":{id},"good":2,"qty":15,"max_cost":100000}}}},{{"price":{{"stall":{id},"good":2,"price":20}}}}]"#
     ));
     g.ok(&me, &format!(r#"[{{"move":{{"stall":{id},"spot":14,"max_fee":100000}}}}]"#));
     let money = g.stall(id).money;
@@ -204,7 +204,7 @@ fn villagers_remember_a_stall_that_served_them() {
 fn a_remembered_stall_with_a_high_reputation_can_charge_more() {
     let plain = stall_wtp(100, 0, 0);
     assert_eq!(plain, 100);
-    assert!(stall_wtp(100, REP_MAX, MEMORY_MAX) > 120);
+    assert!(stall_wtp(100, REP_MAX, MEMORY_MAX) > 115);
 }
 
 #[test]
@@ -213,7 +213,7 @@ fn refusing_a_dear_stall_hurts_its_reputation() {
     let me = acc("me.testnet");
     let id = g.found(&me, "Mine");
     g.ok(&me, &format!(
-        r#"[{{"buy":{{"stall":{id},"good":2,"qty":24,"max_cost":100000}}}},{{"price":{{"stall":{id},"good":2,"price":400}}}},{{"move":{{"stall":{id},"spot":14,"max_fee":100000}}}}]"#
+        r#"[{{"buy":{{"stall":{id},"good":2,"qty":16,"max_cost":100000}}}},{{"price":{{"stall":{id},"good":2,"price":400}}}},{{"move":{{"stall":{id},"spot":14,"max_fee":100000}}}}]"#
     ));
     g.next_night();
     let log = g.world().last.expect("log");
@@ -353,11 +353,23 @@ fn capacity_and_service_limit_a_stall() {
     let cap = TIER_CAPACITY[0];
     let e = g.refused(&me, &format!(r#"[{{"buy":{{"stall":{id},"good":2,"qty":{},"max_cost":100000}}}}]"#, cap + 1));
     assert!(e.contains("Dock does not have"), "{e}");
-    // Fill the stall from two goods: the Dock does not carry a stallful of one on a normal night.
-    let dumplings = g.world().dock[2].left.min(cap);
-    g.ok(&me, &format!(r#"[{{"buy":{{"stall":{id},"good":2,"qty":{dumplings},"max_cost":100000}}}},{{"price":{{"stall":{id},"good":2,"price":5}}}}]"#));
-    let rest = cap - dumplings;
-    g.ok(&me, &format!(r#"[{{"buy":{{"stall":{id},"good":0,"qty":{rest},"max_cost":100000}}}},{{"price":{{"stall":{id},"good":0,"price":5}}}}]"#));
+    // Fill the stall over two nights: the Dock does not carry a stallful on a normal night.
+    let mut room = cap;
+    while room > 0 {
+        let w = g.world();
+        for (good, price) in [(2usize, 5), (0, 5), (1, 5)] {
+            let qty = w.dock[good].left.min(room);
+            if qty > 0 {
+                g.ok(&me, &format!(r#"[{{"buy":{{"stall":{id},"good":{good},"qty":{qty},"max_cost":100000}}}},{{"price":{{"stall":{id},"good":{good},"price":{price}}}}}]"#));
+                room -= qty;
+            }
+        }
+        if room > 0 {
+            g.next_night();
+            room = TIER_CAPACITY[0] - g.stall(id).stock.iter().sum::<u32>();
+        }
+    }
+    g.tick(0);
     let e = g.refused(&me, &format!(r#"[{{"buy":{{"stall":{id},"good":0,"qty":1,"max_cost":100000}}}}]"#));
     assert!(e.contains("cannot hold"), "{e}");
     for _ in 0..3 {
@@ -370,13 +382,26 @@ fn capacity_and_service_limit_a_stall() {
 #[test]
 fn every_event_is_announced_one_night_ahead() {
     let mut g = Game::with_seed(99);
-    let mut announced = g.world().event_next;
+    let first = g.world();
+    let (mut current, mut announced) = (first.event, first.event_next);
+    let mut changes = 0;
     for _ in 0..80 {
+        let before_left = g.world().event_left;
         g.next_night();
         let w = g.world();
-        assert_eq!(w.event, announced, "night {} did not run the announced event", w.night);
-        announced = w.event_next;
+        if before_left == 1 {
+            assert_eq!(w.event, announced, "night {} did not run the announced event", w.night);
+            assert_eq!(w.event_left, event_nights(w.event));
+            current = w.event;
+            announced = w.event_next;
+            changes += 1;
+        } else {
+            assert_eq!(w.event, current, "an event changed before its time");
+            assert_eq!(w.event_next, announced, "the forecast changed");
+            assert_eq!(w.event_left, before_left - 1);
+        }
     }
+    assert!(changes > 20, "only {changes} events in 80 nights");
 }
 
 #[test]
@@ -428,6 +453,7 @@ fn storm_nights_on_chain_have_the_reduced_supply() {
         }
     }
     assert!(seen, "no storm in 80 nights");
+    assert_eq!(event_nights(Event::Storm { good: 0 }), STORM_NIGHTS);
 }
 
 #[test]
@@ -438,29 +464,30 @@ fn a_festival_makes_villagers_buy_that_good() {
     let id = g.found(&me, "Mine");
     g.ok(&me, &format!(r#"[{{"move":{{"stall":{id},"spot":14,"max_fee":100000}}}}]"#));
     let mut hit = false;
-    for _ in 0..80 {
+    for _ in 0..200 {
         let w = g.world();
-        if let Event::Festival { good } = w.event_next {
+        if let (Event::Festival { good }, 1) = (w.event_next, w.event_left) {
             let good = good as usize;
             if g.stall(id).money < dock_cost(good, 0, 8, 150) {
                 g.next_night();
                 continue;
             }
             g.ok(&me, &format!(
-                r#"[{{"buy":{{"stall":{id},"good":{good},"qty":6,"max_cost":100000}}}},{{"price":{{"stall":{id},"good":{good},"price":{}}}}}]"#,
+                r#"[{{"buy":{{"stall":{id},"good":{good},"qty":{},"max_cost":100000}}}},{{"price":{{"stall":{id},"good":{good},"price":{}}}}}]"#,
+                w.dock[good].left.min(6),
                 FAIR[good] / 2
             ));
             g.next_night();
             g.next_night();
             let log = g.world().last.unwrap();
             let n = log.sales.iter().filter(|s| s.2 as usize == good).count();
-            assert!(n >= 5, "a festival of {good} sold only {n}");
+            assert!(n >= 3, "a festival of {good} sold only {n}");
             hit = true;
             break;
         }
         g.next_night();
     }
-    assert!(hit, "no festival in 80 nights");
+    assert!(hit, "no festival in 200 nights");
 }
 
 #[test]
@@ -469,11 +496,11 @@ fn dumplings_spoil_and_silk_does_not() {
     let me = acc("me.testnet");
     let id = g.found(&me, "Mine");
     g.ok(&me, &format!(
-        r#"[{{"buy":{{"stall":{id},"good":2,"qty":20,"max_cost":100000}}}},{{"buy":{{"stall":{id},"good":3,"qty":2,"max_cost":100000}}}}]"#
+        r#"[{{"buy":{{"stall":{id},"good":2,"qty":16,"max_cost":100000}}}},{{"buy":{{"stall":{id},"good":3,"qty":2,"max_cost":100000}}}}]"#
     ));
     g.nights(3);
     let s = g.stall(id);
-    assert!(s.stock[2] < 15, "dumplings should spoil: {}", s.stock[2]);
+    assert!(s.stock[2] < 16, "dumplings should spoil: {}", s.stock[2]);
     assert_eq!(s.stock[3], 2);
 }
 
@@ -516,10 +543,11 @@ fn merchants_keep_a_margin_over_the_dock() {
 fn burn_money(g: &mut Game, who: &near_sdk::AccountId, id: u32) {
     for _ in 0..60 {
         let money = g.stall(id).money;
-        if money < PLAYER_RELIEF_BELOW / 5 {
+        let dock = g.world().dock[2].clone();
+        if money < dock.price as u64 {
+            assert!(money < PLAYER_RELIEF_BELOW);
             return;
         }
-        let dock = g.world().dock[2].clone();
         let qty = (money / (dock.price as u64 * 2)).clamp(1, dock.left as u64);
         g.ok(who, &format!(
             r#"[{{"buy":{{"stall":{id},"good":2,"qty":{qty},"max_cost":100000}}}},{{"sell_back":{{"stall":{id},"good":2,"qty":{qty},"min_pay":0}}}}]"#

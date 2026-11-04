@@ -19,7 +19,7 @@ fn game_with_stall() -> (Game, u32) {
 fn a_client_cannot_name_its_own_wholesale_price() {
     // The only price field in a purchase is a limit; there is no way to send a unit price.
     let (mut g, id) = game_with_stall();
-    let e = g.refused(&me(), &format!(r#"[{{"buy":{{"stall":{id},"good":3,"qty":5,"max_cost":1}}}}]"#));
+    let e = g.refused(&me(), &format!(r#"[{{"buy":{{"stall":{id},"good":3,"qty":3,"max_cost":1}}}}]"#));
     assert!(e.contains("above your limit"), "{e}");
     assert_eq!(g.stall(id).stock[3], 0);
     assert_eq!(g.stall(id).money, STARTER_GRANT);
@@ -42,7 +42,7 @@ fn a_purchase_beyond_the_money_is_refused_whole() {
     assert!(e.contains("not enough money"), "{e}");
     assert_eq!(g.stall(poor).stock[0], 0);
     let money = g.stall(id).money;
-    g.ok(&me(), &format!(r#"[{{"buy":{{"stall":{id},"good":3,"qty":5,"max_cost":{}}}}}]"#, u64::MAX));
+    g.ok(&me(), &format!(r#"[{{"buy":{{"stall":{id},"good":3,"qty":3,"max_cost":{}}}}}]"#, u64::MAX));
     assert!(g.stall(id).money < money);
     g.assert_conserved();
 }
@@ -312,7 +312,7 @@ fn a_spot_war_only_feeds_the_treasury() {
 #[test]
 fn the_money_floor_holds_on_every_stall_after_a_rough_night() {
     let (mut g, id) = game_with_stall();
-    g.ok(&me(), &format!(r#"[{{"buy":{{"stall":{id},"good":3,"qty":5,"max_cost":100000}}}}]"#));
+    g.ok(&me(), &format!(r#"[{{"buy":{{"stall":{id},"good":3,"qty":3,"max_cost":100000}}}}]"#));
     g.next_night();
     // Spending below the floor is the owner's choice; rent alone never goes below it.
     let m = g.stall(id).money;

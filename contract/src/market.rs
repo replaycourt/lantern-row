@@ -65,7 +65,7 @@ pub fn willingness_to_pay(good: usize, taste: u32, over: u32, wealth: u64, event
 
 /// Willingness to pay at one particular stall.
 pub fn stall_wtp(wtp: u64, rep: u16, memory: u8) -> u64 {
-    wtp * (100 + rep as u64 / 50 + memory as u64) / 100
+    wtp * (100 + rep as u64 / REP_BONUS_DIVISOR + memory as u64) / 100
 }
 
 pub fn sales_tax(price: u64) -> u64 {
@@ -107,6 +107,16 @@ impl Rng {
 
     pub fn below(&mut self, n: u32) -> u32 {
         (self.next() % n as u64) as u32
+    }
+}
+
+pub fn event_nights(event: Event) -> u8 {
+    match event {
+        Event::Quiet => QUIET_NIGHTS,
+        Event::Festival { .. } => FESTIVAL_NIGHTS,
+        Event::Storm { .. } => STORM_NIGHTS,
+        Event::Bumper { .. } => BUMPER_NIGHTS,
+        Event::Payday => PAYDAY_NIGHTS,
     }
 }
 

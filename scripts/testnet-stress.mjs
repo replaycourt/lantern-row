@@ -50,7 +50,13 @@ for (let i = 0; i < free; i++) {
     await advance('advance_night while filling')
   }
   const p = { key: newKey(), nonce: 0, id: 0 }
-  const out = await act(p, `found stall ${i}`, [{ found: { name: `Stress ${i}` } }])
+  let out = await act(p, `found stall ${i}`, [{ found: { name: `Stress ${i}` } }])
+  if (out.minted.length === 0) {
+    // The view lagged behind the night's licence count: the next night has fresh ones.
+    await waitDue()
+    await advance('advance_night while filling')
+    out = await act(p, `found stall ${i}`, [{ found: { name: `Stress ${i}` } }])
+  }
   p.id = out.minted[0]
   players.push(p)
 }
@@ -86,5 +92,3 @@ const audit = await view(contract, 'audit')
 console.log('audit', JSON.stringify(audit))
 const summary = rows.filter((r) => r.label.startsWith('advance'))
 console.log(JSON.stringify(summary, null, 1))
-const account = await signer.key
-void account

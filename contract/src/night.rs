@@ -116,18 +116,21 @@ impl LanternRow {
         wants.sort_by(|a, b| b.0.cmp(&a.0));
         wants.truncate(MAX_WANTS);
 
-        // The stalls on this villager's walk. Empty spots do not count against the cap, and
-        // remembered stalls are looked up on purpose.
+        // The stalls on this villager's walk. Empty spots do not count against the cap, and a
+        // remembered stall is worth a longer walk, though even a regular does not always come.
         let mut walk: Vec<usize> = Vec::with_capacity(VISIT_CAP + MEMORY_SLOTS);
         let mut strolled = 0;
         for (i, e) in row.iter().enumerate() {
             if e.stall.spot == NO_SPOT {
                 continue;
             }
+            let roll = rng.below(100);
             let remembered = v.memory.iter().any(|m| m.0 == e.id && m.1 > 0);
             if remembered {
-                walk.push(i);
-            } else if strolled < VISIT_CAP && rng.below(100) < footfall(e.stall.spot) {
+                if roll < footfall(e.stall.spot) + REMEMBERED_FOOTFALL_BONUS {
+                    walk.push(i);
+                }
+            } else if strolled < VISIT_CAP && roll < footfall(e.stall.spot) {
                 walk.push(i);
                 strolled += 1;
             }
@@ -287,6 +290,9 @@ impl LanternRow {
                 if refused > 0 && refused >= sold {
                     price = price * MERCHANT_CUT_PCT / 100;
                     note = NOTE_CUT;
+                } else if sold > 0 && stock == 0 {
+                    price = (price * MERCHANT_SOLD_OUT_PCT / 100).max(price + 1);
+                    note = NOTE_RAISED;
                 } else if sold > 0 && sold * 3 >= stock + sold {
                     price = (price * MERCHANT_RAISE_PCT / 100).max(price + 1);
                     note = NOTE_RAISED;
@@ -301,7 +307,8 @@ impl LanternRow {
                 }
                 price = price.min(FAIR[g] * MERCHANT_MAX_PRICE_PCT / 100);
 
-                let festival = matches!(self.event_next, Event::Festival { good } if good as usize == g);
+                let festival = self.event_left == 1
+                    && matches!(self.event_next, Event::Festival { good } if good as usize == g);
                 let target = if festival { cfg.target[g] * MERCHANT_FESTIVAL_STOCK_PCT / 100 } else { cfg.target[g] };
                 let held: u32 = e.stall.stock.iter().sum();
                 let room = TIER_CAPACITY[e.stall.tier as usize].saturating_sub(held);
@@ -333,8 +340,12 @@ impl LanternRow {
     fn turn_the_night(&mut self, rng: &mut Rng) {
         self.night += 1;
         self.foundings_tonight = 0;
-        self.event_now = self.event_next;
-        self.event_next = roll_event(rng);
+        self.event_left -= 1;
+        if self.event_left == 0 {
+            self.event_now = self.event_next;
+            self.event_left = event_nights(self.event_now);
+            self.event_next = roll_event(rng);
+        }
         for g in 0..GOODS {
             let d = &mut self.dock[g];
             d.heat = d.heat * (100 - HEAT_DECAY_PCT) / 100;

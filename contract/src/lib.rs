@@ -38,6 +38,8 @@ pub struct LanternRow {
     pub(crate) dock_money: u64,
     pub(crate) dock: [DockGood; GOODS],
     pub(crate) event_now: Event,
+    /// Nights the current event still lasts, counting the current one.
+    pub(crate) event_left: u8,
     pub(crate) event_next: Event,
     pub(crate) villagers: Vec<Villager>,
     /// Stall id at each spot; 0 means free.
@@ -75,6 +77,7 @@ impl LanternRow {
             dock_money: DOCK_FOUNDING,
             dock: [DockGood::default(); GOODS],
             event_now: Event::Quiet,
+            event_left: 1,
             event_next: Event::Quiet,
             villagers: Vec::with_capacity(VILLAGERS),
             row: [0; ROW_SPOTS],

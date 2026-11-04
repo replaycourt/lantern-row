@@ -4,7 +4,7 @@
 pub const NIGHT_MS: u64 = 20_000;
 /// Most nights one `advance_night` call simulates. Nights beyond that are slept through: they are
 /// not simulated and the clock simply restarts, so no backlog can ever exceed one call.
-pub const MAX_CATCHUP_NIGHTS: u64 = 6;
+pub const MAX_CATCHUP_NIGHTS: u64 = 30;
 /// How many past night logs stay readable.
 pub const LOG_KEEP: u32 = 6;
 
@@ -17,7 +17,7 @@ pub const FAIR: [u32; GOODS] = [60, 90, 40, 350, 180];
 /// Dock wholesale price with no recent buying.
 pub const DOCK_BASE: [u32; GOODS] = [30, 46, 20, 170, 90];
 /// Units per night the Dock can supply on a normal night.
-pub const DOCK_SUPPLY: [u32; GOODS] = [16, 10, 26, 5, 7];
+pub const DOCK_SUPPLY: [u32; GOODS] = [12, 7, 18, 3, 5];
 /// Heat (units recently bought) that doubles the wholesale price.
 pub const HEAT_SLOPE: [u32; GOODS] = [120, 80, 180, 24, 45];
 /// Heat lost per night.
@@ -66,9 +66,11 @@ pub const NO_SPOT: u8 = 255;
 /// Most stalls one villager looks at per night (plus up to three remembered ones). Together with
 /// `ROW_SPOTS` this bounds the work of a night.
 pub const VISIT_CAP: usize = 10;
+/// A villager is this many percent likelier to walk to a stall they remember.
+pub const REMEMBERED_FOOTFALL_BONUS: u32 = 25;
 /// Percent chance a villager walks past a stall at a spot.
 pub const fn footfall(spot: u8) -> u32 {
-    if spot == NO_SPOT { 0 } else { 100 - (spot as u32 * 3) / 2 }
+    if spot == NO_SPOT { 0 } else { 100 - spot as u32 * 3 }
 }
 /// One-off fee to move to a free spot. Displacing an occupant costs `DISPLACE_FACTOR` times this.
 pub const fn spot_fee(spot: u8) -> u64 {
@@ -106,6 +108,8 @@ pub const REP_START_MERCHANT: u16 = 250;
 pub const REP_PER_SALE: u16 = 4;
 pub const REP_PER_REFUSAL: u16 = 3;
 pub const REP_DECAY_PCT: u16 = 3;
+/// Percent a villager adds to what they would pay at a stall: reputation / this.
+pub const REP_BONUS_DIVISOR: u64 = 100;
 
 pub const MAX_PRICE_FACTOR: u32 = 10;
 pub const MAX_NAME_CHARS: usize = 24;
@@ -158,7 +162,7 @@ pub const UNMET_CAP: u8 = 30;
 /// Memory of a stall that served a villager: percent bonus, gained per sale, faded per night.
 pub const MEMORY_SLOTS: usize = 3;
 pub const MEMORY_GAIN: u8 = 2;
-pub const MEMORY_MAX: u8 = 10;
+pub const MEMORY_MAX: u8 = 8;
 
 // ---- NPC merchants ----------------------------------------------------------------------------
 
@@ -169,16 +173,18 @@ pub struct MerchantCfg {
     pub target: [u32; GOODS],
 }
 pub const MERCHANT_TABLE: [MerchantCfg; MERCHANTS as usize] = [
-    MerchantCfg { name: "The Quiet Kettle", spot: 1, target: [14, 3, 0, 0, 2] },
-    MerchantCfg { name: "Steam and Sesame", spot: 4, target: [3, 0, 14, 0, 0] },
-    MerchantCfg { name: "Wick and Flask", spot: 8, target: [0, 12, 3, 0, 2] },
-    MerchantCfg { name: "Moth and Loom", spot: 12, target: [2, 0, 0, 5, 2] },
-    MerchantCfg { name: "Seven Knots", spot: 16, target: [0, 2, 0, 1, 8] },
-    MerchantCfg { name: "Uncle's Everything", spot: 20, target: [5, 4, 6, 1, 2] },
+    MerchantCfg { name: "The Quiet Kettle", spot: 1, target: [9, 2, 0, 0, 1] },
+    MerchantCfg { name: "Steam and Sesame", spot: 4, target: [2, 0, 11, 0, 0] },
+    MerchantCfg { name: "Wick and Flask", spot: 8, target: [0, 7, 2, 0, 1] },
+    MerchantCfg { name: "Moth and Loom", spot: 12, target: [1, 0, 0, 3, 1] },
+    MerchantCfg { name: "Seven Knots", spot: 16, target: [0, 1, 0, 0, 5] },
+    MerchantCfg { name: "Uncle's Everything", spot: 20, target: [4, 2, 5, 1, 1] },
 ];
 pub const MERCHANT_START_TIER: u8 = 1;
 /// Selling at least a third of the stock in a night raises the price by this much.
 pub const MERCHANT_RAISE_PCT: u32 = 103;
+/// Selling out raises it by this much: the shelf was empty, so it was too cheap.
+pub const MERCHANT_SOLD_OUT_PCT: u32 = 108;
 /// Villagers walking away cuts it by this much.
 pub const MERCHANT_CUT_PCT: u32 = 96;
 /// A night without any interest cuts it by this much, one time in `MERCHANT_DRIFT_ODDS`.
@@ -231,8 +237,14 @@ pub const BUMPER_PRICE_PCT: u32 = 70;
 /// Payday: wages at this percent, and villagers feel richer.
 pub const PAYDAY_WAGE_PCT: u64 = 150;
 pub const PAYDAY_WTP_PCT: u64 = 110;
-/// Chance of each event per night, out of 100: festival, storm, bumper, payday; the rest is quiet.
-pub const EVENT_ODDS: [u32; 4] = [28, 22, 15, 10];
+/// Chance of each event when one is rolled, out of 100: festival, storm, bumper, payday; the rest is quiet.
+pub const EVENT_ODDS: [u32; 4] = [30, 25, 15, 10];
+/// How many nights each kind of event lasts. A storm is long enough to empty shelves.
+pub const FESTIVAL_NIGHTS: u8 = 2;
+pub const STORM_NIGHTS: u8 = 3;
+pub const BUMPER_NIGHTS: u8 = 2;
+pub const PAYDAY_NIGHTS: u8 = 1;
+pub const QUIET_NIGHTS: u8 = 2;
 
 /// What the Treasury starts with: everything not handed out at founding.
 pub const fn treasury_founding() -> u64 {

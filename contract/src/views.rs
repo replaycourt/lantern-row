@@ -78,7 +78,11 @@ pub struct WorldView {
     pub ends_ms: u64,
     /// True once anyone may call `advance_night`.
     pub due: bool,
+    /// In force tonight.
     pub event: Event,
+    /// Nights it still lasts, counting tonight.
+    pub event_left: u8,
+    /// What follows it. An event is always announced at least one night ahead.
     pub event_next: Event,
     pub treasury: u64,
     pub dock_money: u64,
@@ -277,6 +281,7 @@ impl LanternRow {
             ends_ms: ends,
             due: now >= ends,
             event: self.event_now,
+            event_left: self.event_left,
             event_next: self.event_next,
             treasury: self.treasury,
             dock_money: self.dock_money,
