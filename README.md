@@ -52,6 +52,28 @@ near contract call-function as-read-only lantern-row.testnet nft_token json-args
 
 You see NPC merchants and players ranked by net worth, and a token whose metadata is computed from the stall's live state.
 
+**Play a real night from the command line**, with any testnet account of your own. Do this, replacing `you.testnet`:
+
+```sh
+near contract call-function as-transaction lantern-row.testnet play json-args '{"action":"[{\"found\":{\"name\":\"My Stall\"}}]"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as you.testnet network-config testnet sign-with-keychain send
+near contract call-function as-read-only lantern-row.testnet player json-args '{"account":"you.testnet"}' network-config testnet now
+```
+
+You see `minted` with your stall id, then your stall with 3,000 coin. Next, buy stock and set a price, replacing `7` with your stall id:
+
+```sh
+near contract call-function as-transaction lantern-row.testnet play json-args '{"action":"[{\"buy\":{\"stall\":7,\"good\":0,\"qty\":5,\"max_cost\":1000}},{\"price\":{\"stall\":7,\"good\":0,\"price\":58}}]"}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR' sign-as you.testnet network-config testnet sign-with-keychain send
+```
+
+Then end the night, once 20 seconds have passed since the last one ended. Anyone may do this:
+
+```sh
+near contract call-function as-transaction lantern-row.testnet advance_night json-args '{}' prepaid-gas '150 Tgas' attached-deposit '0 NEAR' sign-as you.testnet network-config testnet sign-with-keychain send
+near contract call-function as-read-only lantern-row.testnet night_log json-args '{}' network-config testnet now
+```
+
+You see every sale of the night that just ended, as `[villager, stall, good, price]`, perhaps some of them at your stall.
+
 **Run the tests and the simulation.** Do this:
 
 ```sh
@@ -60,7 +82,7 @@ cargo test
 cargo test --test economy_sim -- --nocapture --test-threads=1
 ```
 
-You see all tests pass, then tables of hundreds of simulated nights: money, sales, prices, and how nine bot strategies end up. Results are in [docs/ECONOMY.md](docs/ECONOMY.md).
+You see all tests pass, then tables of hundreds of simulated nights: money, sales, prices, and how ten bot strategies end up. Results are in [docs/ECONOMY.md](docs/ECONOMY.md).
 
 **Build the contract.** `contract/build.sh` builds the wasm, checks it for local paths and prints its sha256, which is also in `contract/WASM_SHA256`.
 

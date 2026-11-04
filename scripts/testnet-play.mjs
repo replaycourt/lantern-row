@@ -38,13 +38,15 @@ function report(label, r) {
   console.log(`${label.padEnd(34)} ${tgas(r.gas).padStart(7)} Tgas  ${r.hash}${r.failure ? '  FAILED ' + r.failure : ''}`)
 }
 
+// The local nonce is the truth: a view right after a transaction can lag behind it.
+let lastNonce = (await view(contract, 'player', { account })).nonce
+
 async function act(label, actions) {
-  const me = await view(contract, 'player', { account })
-  const nonce = me.nonce + 1
+  const nonce = ++lastNonce
   const action = JSON.stringify(actions)
   const message = `lantern-row:v1:${contract}:${nonce}:${action}`
   const signature = hex(sign(player, Buffer.from(message, 'utf8')))
-  const r = await payer().call(contract, 'act', { player_pubkey: account, nonce, action, signature }, { gas: 50_000_000_000_000n })
+  const r = await payer().call(contract, 'act', { player_pubkey: account, nonce, action, signature }, { gas: 30_000_000_000_000n })
   report(label, r)
   if (r.value?.error) console.log(`  refused: ${r.value.error}`)
   return r.value
@@ -65,15 +67,17 @@ function decide(w, cfg, s) {
   cfg.goods.forEach((good, g) => {
     const unit = w.dock[g].price
     const rivals = w.row.filter((x) => x.id !== s.id && x.stock[g] > 0 && x.price[g] > 0).map((x) => x.price[g])
-    const rival = rivals.length ? Math.min(...rivals) : Math.floor((good.fair * 130) / 100)
-    let p = Math.max(Math.floor((rival * 97) / 100), Math.floor((unit * 112) / 100))
-    const festivalNext = w.event_next.festival?.good === g
-    if (festivalNext || w.event.festival?.good === g) p = Math.floor((p * 125) / 100)
-    p = Math.min(p, good.fair * 2)
+    const rival = rivals.length ? Math.floor((Math.min(...rivals) * 97) / 100) : Math.floor((good.fair * 140) / 100)
+    const floor = Math.max(Math.floor((unit * 125) / 100), Math.floor((good.fair * 95) / 100))
+    let p = Math.min(Math.max(rival, floor), Math.max(floor, Math.floor((good.fair * 140) / 100)))
+    const soon = w.event_left === 1
+    const festivalNext = soon && w.event_next.festival?.good === g
+    const stormNext = soon && w.event_next.storm?.good === g
+    if (w.event.festival?.good === g) p = Math.floor((p * 125) / 100)
+    if (w.event.storm?.good === g) p = Math.floor((p * 130) / 100)
     if (p !== s.price[g]) acts.push({ price: { stall: s.id, good: g, price: p } })
-    const target = MIX[g] * (s.tier + 1) * (festivalNext ? 2 : 1)
-    const want = Math.max(0, target - s.stock[g])
-    const qty = Math.min(want, room, w.dock[g].left, Math.floor((money * 0.3) / Math.max(unit, 1)))
+    const target = Math.floor(MIX[g] * (1 + s.tier / 2) * (festivalNext ? 2 : stormNext ? 1.5 : 1))
+    const qty = Math.min(Math.max(0, target - s.stock[g]), room, w.dock[g].left, Math.floor((money * 0.3) / Math.max(unit, 1)))
     if (qty > 0 && (unit * 110) / 100 < p) {
       acts.push({ buy: { stall: s.id, good: g, qty, max_cost: money } })
       room -= qty
@@ -96,6 +100,9 @@ let me = await view(contract, 'player', { account })
 if (me.stalls.length === 0) {
   const out = await act('found a stall', [{ found: { name: 'Testnet Lantern' } }])
   console.log(`  minted stall ${out.minted}`)
+}
+while (me.stalls.length === 0) {
+  await sleep(1000)
   me = await view(contract, 'player', { account })
 }
 const id = me.stalls[0].id
@@ -105,11 +112,15 @@ for (let n = 0; n < nights; n++) {
   const w = await view(contract, 'world')
   const s = (await view(contract, 'player', { account })).stalls[0]
   const acts = decide(w, cfg, s).slice(0, cfg.max_actions_per_call)
-  console.log(`night ${w.night}: event ${JSON.stringify(w.event)}, next ${JSON.stringify(w.event_next)}, stall money ${s.money}, worth ${s.worth}`)
+  console.log(`night ${w.night}: event ${JSON.stringify(w.event)} (${w.event_left} left), next ${JSON.stringify(w.event_next)}, stall money ${s.money}, worth ${s.worth}`)
   if (acts.length) await act(`night ${w.night}: ${acts.length} actions`, acts)
   await waitDue()
-  await advance(`advance_night night ${w.night}`)
-  const log = await view(contract, 'night_log', {})
+  const done = await advance(`advance_night night ${w.night}`)
+  let log = null
+  while (!log || log.night < done.night - 1) {
+    await sleep(800)
+    log = await view(contract, 'night_log', {})
+  }
   const sold = log.sales.filter((x) => x[1] === id).length
   console.log(`  ${log.sales.length} sales on the row, ${sold} at my stall, ${log.restocks.length} restocks, wages ${log.wages}, tax ${log.tax}`)
 }

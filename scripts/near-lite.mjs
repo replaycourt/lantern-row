@@ -68,8 +68,7 @@ const str = (s) => {
   return Buffer.concat([u32(b.length), b])
 }
 
-function encodeFunctionCallTx({ signerId, key, nonce, receiverId, blockHash, method, args, gas, deposit }) {
-  const argBytes = Buffer.from(JSON.stringify(args), 'utf8')
+function encodeTx({ signerId, key, nonce, receiverId, blockHash, action }) {
   return Buffer.concat([
     str(signerId),
     u8(0), key.publicKey,
@@ -77,13 +76,16 @@ function encodeFunctionCallTx({ signerId, key, nonce, receiverId, blockHash, met
     str(receiverId),
     blockHash,
     u32(1), // one action
-    u8(2), // FunctionCall
-    str(method),
-    u32(argBytes.length), argBytes,
-    u64(gas),
-    u128(deposit),
+    action,
   ])
 }
+
+function functionCallAction({ method, args, gas, deposit }) {
+  const argBytes = Buffer.from(JSON.stringify(args), 'utf8')
+  return Buffer.concat([u8(2), str(method), u32(argBytes.length), argBytes, u64(gas), u128(deposit)])
+}
+
+const transferAction = (deposit) => Buffer.concat([u8(3), u128(deposit)])
 
 // ---- RPC ----------------------------------------------------------------------------------------
 
@@ -134,6 +136,15 @@ export class Signer {
   }
 
   async call(receiverId, method, args, { gas = 100_000_000_000_000n, deposit = 0n } = {}) {
+    return this.send(receiverId, functionCallAction({ method, args, gas, deposit }))
+  }
+
+  /** Sends NEAR. To an implicit account that does not exist yet, this creates it. */
+  async transfer(receiverId, yocto) {
+    return this.send(receiverId, transferAction(yocto))
+  }
+
+  async send(receiverId, action) {
     if (this.nonce === null) {
       const k = await rpc('query', {
         request_type: 'view_access_key',
@@ -145,17 +156,7 @@ export class Signer {
     }
     this.nonce += 1n
     const block = await rpc('block', { finality: 'final' })
-    const tx = encodeFunctionCallTx({
-      signerId: this.accountId,
-      key: this.key,
-      nonce: this.nonce,
-      receiverId,
-      blockHash: b58decode(block.header.hash),
-      method,
-      args,
-      gas,
-      deposit,
-    })
+    const tx = encodeTx({ signerId: this.accountId, key: this.key, nonce: this.nonce, receiverId, blockHash: b58decode(block.header.hash), action })
     const digest = crypto.createHash('sha256').update(tx).digest()
     const signed = Buffer.concat([tx, u8(0), sign(this.key, digest)])
     const res = await rpc('send_tx', { signed_tx_base64: signed.toString('base64'), wait_until: 'EXECUTED_OPTIMISTIC' })

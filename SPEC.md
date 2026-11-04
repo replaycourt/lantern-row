@@ -17,19 +17,19 @@ All coin is an integer inside the contract. It has no market value and is not a 
 3. **Closing.** Each stall on the row loses goods to spoilage, pays rent to the Treasury, loses 3% reputation. A broke player who is still active gets relief. A player stall nobody acted on for 60 nights loses its spot.
 4. **Dock dues.** The Dock hands 40% of its money above 20,000 to the Treasury.
 5. **Merchants.** NPC merchants reprice and restock from whatever the Dock has left (section 8). They buy after players, so a player who gets there first has the pick of the Dock.
-6. **Next night.** The announced event takes effect, a new one is announced, Dock heat decays 30% and Dock supply resets.
+6. **Next night.** If the current event has run its nights, the announced one takes effect and a new one is announced. Dock heat decays 30% and Dock supply resets.
 
-`advance_night` can be called by anyone once the night has elapsed. Called early it does nothing and returns `advanced: 0`, so racing clients do no harm. It simulates at most 6 nights per call. Nights beyond that are not simulated: the town slept through them, the clock restarts and no backlog remains. There is no separate loop over all stalls: the row is loaded once, processed in memory, saved once, and at most 4 stalls off the row get their rent settled.
+`advance_night` can be called by anyone once the night has elapsed. Called early it does nothing and returns `advanced: 0`, so racing clients do no harm. It simulates at most 30 nights per call. Nights beyond that are not simulated: the town slept through them, the clock restarts and no backlog remains. There is no separate loop over all stalls: the row is loaded once, processed in memory, saved once, and at most 4 stalls off the row get their rent settled.
 
 ## 3. Goods
 
 | id | good | fair price | Dock base | Dock supply/night | heat that doubles the price | spoils/night | nights between needs |
 |---|---|---|---|---|---|---|---|
-| 0 | tea | 60 | 30 | 16 | 120 | 2% | 2 |
-| 1 | lamp oil | 90 | 46 | 10 | 80 | 1% | 3 |
-| 2 | dumplings | 40 | 20 | 26 | 180 | 15% | 1 |
-| 3 | silk | 350 | 170 | 5 | 24 | 0 | 8 |
-| 4 | charms | 180 | 90 | 7 | 45 | 0 | 5 |
+| 0 | tea | 60 | 30 | 12 | 120 | 2% | 2 |
+| 1 | lamp oil | 90 | 46 | 7 | 80 | 1% | 3 |
+| 2 | dumplings | 40 | 20 | 18 | 180 | 15% | 1 |
+| 3 | silk | 350 | 170 | 3 | 24 | 0 | 8 |
+| 4 | charms | 180 | 90 | 5 | 45 | 0 | 5 |
 
 ## 4. Money: a closed loop
 
@@ -49,10 +49,10 @@ Twelve named villagers (the `villagers` array in `world()`), each with a wallet 
 - **Wage**: fixed, paid in full while the Treasury holds at least 300,000 and proportionally less below (down to 25%). A wallet at 12 nights of wage gets no more until it spends.
 - **Need**: a villager wants a good when `nights since last bought + spare ≥ need period`. The period is the good's base period × 100 / taste, at least 1. `spare` is the wealth bonus: one night per 25 points of wealth above 100.
 - **Willingness to pay**: `fair × taste% × (100 + 15 × nights overdue, at most 8)% × wealth% × event%`. Wealth is `60 + 40 × wallet / (5 × wage)`, between 60 and 150. So a good nobody could buy gets dearer every night, by the villagers' own decision.
-- **The walk**: looks at a stall on the row with chance `footfall(spot) = 100 − 1.5 × spot` percent, up to 10 stalls from the front. Remembered stalls are always looked up.
-- **The choice**: for each want, most overdue first, at most 4 goods a night, buy one unit where `willingness × (100 + rep/50 + memory)% − price` is largest, among stalls with stock, a price, spare service and a price within reach. A price of 0 means not for sale.
-- **Memory**: each villager remembers 3 stalls. A sale adds 2% (at most 10%), and a remembered stall that did not serve them fades 1% per night. Memory lives with the villager, keyed by stall id, so it stays with the token through a sale.
-- **Refusal**: when a stall had the good but asked more than the villager would pay, the cheapest such stall hears about it: −3 reputation and an entry in `refusals`.
+- **The walk**: looks at a stall on the row with chance `footfall(spot) = 100 − 3 × spot` percent, up to 10 stalls from the front. A remembered stall gets 25 points more chance and does not count against the 10.
+- **The choice**: for each want, most overdue first, at most 4 goods a night, buy one unit where `willingness × (100 + rep/100 + memory)% − price` is largest, among stalls with stock, a price, spare service and a price within reach. A price of 0 means not for sale.
+- **Memory**: each villager remembers 3 stalls. A sale adds 2% (at most 8%), and a remembered stall that did not serve them fades 1% per night. Memory lives with the villager, keyed by stall id, so it stays with the token through a sale.
+- **Refusal**: when a stall had the good but asked more than the villager would pay, the cheapest such stall hears about it, even if the villager then buys elsewhere: −3 reputation and an entry in `refusals`.
 
 ## 6. The Dock
 
@@ -82,24 +82,24 @@ An NPC wholesaler. Its prices rise with what was bought and fall with time.
 Six stalls with their own money and their own rule, in `run_merchants` in [`contract/src/night.rs`](contract/src/night.rs). They are tokens 1 to 6 owned by the contract itself, which has no keys, so nobody can operate or take them. For each good they carry:
 
 - Villagers refused it at least as often as they bought it: price −4%.
-- Sold at least a third of what it had: price +3%.
+- Sold out: price +8%. Otherwise sold at least a third of what it had: price +3%.
 - No interest at all: price −3%, one night in two.
 - Never below 125% of the Dock's current unit price, never above 260% of fair.
-- Skips restocking when the Dock costs more than its price. Otherwise it refills to its target, at most 30% of its money per good. It holds 60% more ahead of an announced festival.
+- Skips restocking when the Dock costs more than its price. Otherwise it refills to its target, at most 30% of its money per good. It holds 60% more the night before a festival.
 
 `notes[good]` in the stall view holds the reason behind each price, an index into `config().notes`, for a tooltip.
 
 ## 9. Events
 
-Rolled from `env::random_seed()` hashed with the night number. An event is always public one night ahead, as `event_next` in `world()`.
+Rolled from `env::random_seed()` hashed with the night number. The next event is rolled when the current one starts, so it is public at least one night ahead, as `event_next` in `world()`. `event_left` says how many nights the current one still lasts, counting tonight.
 
-| event | odds | effect on its night |
-|---|---|---|
-| `{"festival":{"good":g}}` | 28% | everyone wants that good now and buys 2, willingness to pay ×1.3 |
-| `{"storm":{"good":g}}` | 22% | Dock supply of it ×0.25, price ×1.5 |
-| `{"bumper":{"good":g}}` | 15% | Dock supply of it ×2, price ×0.7 |
-| `"payday"` | 10% | wages ×1.5, willingness to pay ×1.1 |
-| `"quiet"` | 25% | nothing |
+| event | odds | nights | effect |
+|---|---|---|---|
+| `{"festival":{"good":g}}` | 30% | 2 | everyone wants that good now and buys 2, willingness to pay ×1.3 |
+| `{"storm":{"good":g}}` | 25% | 3 | Dock supply of it ×0.25 (at least 1), price ×1.5 |
+| `{"bumper":{"good":g}}` | 15% | 2 | Dock supply of it ×2, price ×0.7 |
+| `"payday"` | 10% | 1 | wages ×1.5, willingness to pay ×1.1 |
+| `"quiet"` | 20% | 2 | nothing |
 
 ## 10. The stall is the NFT
 
@@ -192,6 +192,7 @@ The contract computes every price itself. The `max_*` and `min_*` fields only sa
   "night": 41, "now_ms": 1800000031000, "ends_ms": 1800000040000,
   "due": false,                    // true once advance_night would do something
   "event": "quiet",                // in force tonight
+  "event_left": 1,                 // nights it still lasts, counting tonight
   "event_next": {"festival": {"good": 3}},
   "treasury": 870000, "dock_money": 24000,
   "dock": [{"price": 33, "left": 12, "heat": 9, "factor_pct": 100}],   // per good
@@ -210,7 +211,7 @@ The contract computes every price itself. The `max_*` and `min_*` fields only sa
   "id": 7, "name": "Silk Lantern", "npc": false,
   "owner": "<64 hex>", "founder": "<64 hex>",
   "spot": 21,                      // null: off the row, no customers
-  "footfall": 69, "money": 3120,
+  "footfall": 37, "money": 3120,
   "stock": [8,5,10,2,3], "price": [55,84,36,320,170],   // per good; price 0: not for sale
   "rep": 214, "tier": 0, "capacity": 40, "service": 10,
   "worth": 3990, "listed": null, "rent_next": 16,
@@ -239,14 +240,14 @@ The contract computes every price itself. The `max_*` and `min_*` fields only sa
 1. `config()` once. Load the local key, or make one. `player(account)` for the stall and nonce. If there is no stall, `act` a `found`.
 2. Poll `world()` every second or two. Use `now_ms` and `ends_ms` for the timer, not the browser clock.
 3. When `due` is true, call `advance_night` with a pool key. When `night` changes, animate `last`.
-4. Between nights, batch the player's changes into one `act`. Keep a local nonce above the last one sent, because transactions can overtake each other.
-5. Rotate through the pool keys. If a key's allowance runs out, use another.
+4. Between nights, batch the player's changes into one `act`. Keep a local nonce and increase it yourself. Transactions can overtake each other, and a view right after a transaction can lag behind it, so `player().nonce` may still show the old value. For the same reason, trust `ActOutcome` over the next view.
+5. Rotate through the pool keys. If a key's allowance runs out, use another. The allowance is charged for the attached gas up front at a pessimistic price and refunded afterwards, so attach no more than the table above says.
 
 ## 13. Bounds
 
 | limit | value | why |
 |---|---|---|
-| Nights simulated per `advance_night` | 6 | gas |
+| Nights simulated per `advance_night` | 30 | gas |
 | Spots on the row, stalls a villager looks at | 24, 10 + 3 remembered | gas |
 | Player stalls in total, new ones per night | 100, 4 | storage, grant budget |
 | Accounts on the register | 400 | storage: the contract pays for it |

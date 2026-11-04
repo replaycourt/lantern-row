@@ -571,7 +571,7 @@ fn no_fixed_price_is_right_everywhere() {
 #[test]
 fn an_attentive_player_outplays_fixed_price_refilling() {
     println!("\nthe attentive Trader against the best fixed level and against a field of refillers");
-    let (best_alone, _) = fixed_level(140);
+    let (best_alone, _) = fixed_level(130);
     let mut trader_alone = 0;
     for seed in 1..=4 {
         let mut g = Game::with_seed(seed);
