@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://test.rpc.fastnear.com https://near-testnet.drpc.org; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<title>Lantern Row</title>
+<meta name="description" content="Run a stall on a lantern-lit night market that never closes. Twelve villagers with their own wallets walk the row every 20 seconds. No sign-up, no wallet, two minutes to learn.">
+<meta name="theme-color" content="#0f0d2b">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Lantern Row">
+<meta property="og:description" content="A night market that never closes. Run a stall, price your tea, out-trade The Quiet Kettle. No sign-up, no wallet.">
+<meta property="og:image" content="https://replaycourt.github.io/lantern-row/web/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:url" content="https://replaycourt.github.io/lantern-row/web/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Lantern Row">
+<meta name="twitter:description" content="A night market that never closes. Run a stall, price your tea, out-trade The Quiet Kettle. No sign-up, no wallet.">
+<meta name="twitter:image" content="https://replaycourt.github.io/lantern-row/web/og.png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="scene" aria-label="The lantern-lit market street" role="img"></canvas>
+
+<section id="title" class="screen">
+  <canvas id="logo" width="520" height="190" aria-label="Lantern Row" role="img"></canvas>
+  <p id="title-line" class="title-line">Loading the street…</p>
+  <div id="title-actions" class="title-actions hidden">
+    <div id="name-row" class="name-row">
+      <label for="stall-name" class="sr-only">Name your stall</label>
+      <input id="stall-name" maxlength="24" autocomplete="off" spellcheck="false" placeholder="Name your stall">
+      <button id="shuffle-name" class="ghost" type="button" title="Another name">⟳</button>
+    </div>
+    <button id="start" class="big primary" type="button">Open your stall</button>
+    <p class="fine">No sign-up. Two minutes to learn. Play money on a shared street.</p>
+  </div>
+  <p id="title-error" class="title-error hidden"></p>
+</section>
+
+<header id="hud" class="hidden">
+  <div class="hud-left">
+    <div class="chip stall-chip" id="stall-chip">
+      <span class="stall-sign" id="hud-name">Your stall</span>
+      <span class="money"><span class="coin-icon" aria-hidden="true"></span><b id="hud-money">0</b></span>
+      <span class="sub" id="hud-worth">worth 0</span>
+    </div>
+  </div>
+  <div class="hud-center">
+    <div class="clock" id="clock">
+      <svg viewBox="0 0 44 44" class="ring" aria-hidden="true"><circle class="ring-bg" cx="22" cy="22" r="19"></circle><circle class="ring-fg" id="ring-fg" cx="22" cy="22" r="19"></circle></svg>
+      <div class="clock-text"><span class="label">Night</span><b id="hud-night">–</b></div>
+    </div>
+    <div class="event-banner" id="event-banner"><b id="event-title">A quiet night</b><span id="event-next"></span></div>
+  </div>
+  <div class="hud-right">
+    <button class="icon-btn" id="btn-board" type="button" title="Leaderboard" aria-label="Leaderboard"><span class="ico ico-trophy"></span><span class="icon-label">Ranks</span></button>
+    <button class="icon-btn" id="btn-deed" type="button" title="Your deed" aria-label="Your deed"><span class="ico ico-deed"></span><span class="icon-label">Deed</span></button>
+    <button class="icon-btn" id="btn-sound" type="button" title="Sound" aria-label="Sound"><span class="ico ico-sound"></span><span class="icon-label">Sound</span></button>
+    <button class="icon-btn" id="btn-proof" type="button" title="On-chain proof" aria-label="On-chain proof"><span class="ico ico-proof"></span><span class="icon-label">Proof</span></button>
+  </div>
+</header>
+
+<div id="hint" class="hint hidden"><span id="hint-text"></span></div>
+
+<aside id="summary" class="summary hidden" aria-live="polite">
+  <div class="summary-head"><span class="summary-night" id="summary-night"></span><b id="summary-headline"></b><button class="close" id="summary-close" type="button" aria-label="Close">×</button></div>
+  <ul id="summary-lines"></ul>
+</aside>
+
+<section id="panel" class="panel hidden">
+  <div class="goods" id="goods"></div>
+  <div class="actions">
+    <button class="big primary" id="btn-restock" type="button"><span class="btn-title">Restock</span><span class="btn-sub" id="restock-sub">fill the counter</span></button>
+    <button class="big" id="btn-smart" type="button"><span class="btn-title">Smart prices</span><span class="btn-sub">just under the rivals</span></button>
+    <div class="status" id="status"><span class="dot"></span><span id="status-text">Ready</span></div>
+  </div>
+</section>
+
+<div id="toast" class="toast hidden" role="status"></div>
+
+<div id="sheet-backdrop" class="sheet-backdrop hidden"></div>
+<section id="sheet" class="sheet hidden" role="dialog" aria-modal="true">
+  <div class="sheet-head"><h2 id="sheet-title">Sheet</h2><button class="close" id="sheet-close" type="button" aria-label="Close">×</button></div>
+  <div class="sheet-body" id="sheet-body"></div>
+</section>
+
+<div id="unsupported" class="screen hidden">
+  <h1>Lantern Row needs a newer browser</h1>
+  <p>The street signs your orders in your own browser (Ed25519 through WebCrypto). Chrome 137, Safari 17, Firefox 130 or newer can do that.</p>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

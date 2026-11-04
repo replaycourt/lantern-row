@@ -1,109 +1,75 @@
+<p align="center"><img src="web/og.png" alt="Lantern Row: a lantern-lit market street at night" width="720"></p>
+
 # Lantern Row
 
-A night-market trading game whose whole economy runs on one NEAR contract, with no owner and no way to patch it. Built at NEAR HACKATHON for the `games` and `nfts` tracks.
+**A night market that never closes.** Run a stall on a shared, lantern-lit street where twelve villagers with their own wallets, tastes and memories walk the row every 20 seconds and buy what they need. Price your tea right, out-trade The Quiet Kettle, grow your stall, and sell it whole when you are done. The entire economy is one NEAR contract with no owner and no way to patch it. Built at NEAR HACKATHON for the `games` and `nfts` tracks.
 
-You run a stall on a lantern-lit street. Every 20 seconds a night ends: twelve villagers with their own wallets, tastes and memories walk the row and buy. You buy stock at the Dock, set prices, and try to out-trade the NPC merchants and the other players.
+**Play now:** https://replaycourt.github.io/lantern-row/web/ (testnet, play money, no sign-up)
 
-**Status: phase 1.** The contract, tests, economy simulation and testnet deployment exist. **The web client does not exist yet**, so today you try it through the commands below.
+<p align="center"><img src="docs/shots/mid-night.png" alt="Villagers walking the row at night, coins flying" width="720"></p>
 
-## The problem it addresses
+## How to play
 
-Games with on-chain economies are usually a token with a game attached, and they need a wallet before the first click. Here the economy is the game, and it keeps running by its own rules without a developer:
+1. **Tap *Open your stall*.** See a stall with your name on it appear on the street, with 3,000 coin inside. No wallet, no sign-up: your browser made a key, and that key owns the stall.
+2. **Tap *Restock*.** See tea, oil and dumplings land on your counter, bought from the Dock at tonight's prices.
+3. **Tap *Smart prices*, or nudge a price with − and +.** See the price appear on your counter, just under the cheapest merchant.
+4. **Wait for the clock.** See Bao, Cora and the others walk the row, stop at stalls, and buy, with coins flying to your stall and little remarks: "At last, tea!" or "Too dear!"
+5. **Read the night summary.** See what sold, who walked away and why, and what it cost you in rent.
+6. **Watch the banner.** See a festival or a storm announced a night ahead, with bunting and fireworks or rain and dim lanterns when it comes. Stock up before a festival; price up in a storm.
+7. **Open *Deed*.** See your stall as the token it is: its coin, goods, reputation and spot. Grow it, move it nearer the gate, or list it for sale and watch the "FOR SALE" sign go up.
+8. **Open *Ranks*.** See yourself among the six merchants and every other player who ever opened a stall here. Open the page in a second browser and you will find your first stall already on the street.
 
-- **NPCs with wallets**: villagers earn wages and spend them, and their willingness to pay rises when a good is scarce. Merchants have their own money and reprice by a readable rule.
-- **Player-owned market**: scarcity and gluts come from what people buy. No admin sets a price.
-- **No wallet needed**: the browser makes a key, the key's implicit account owns the stall, and a pool of public gas keys pays. Players never see a transaction.
-- **NFTs as accounts**: a stall is a NEP-171 token that holds its own money, stock, reputation and spot. Sell the token and all of it goes along. The founder earns a royalty on every resale.
+Two minutes is enough to learn it. The merchants are the thing to beat: they reprice by readable rules (tap any stall to see their prices and why), so a watchful player undercuts them.
 
-## Try it
+## Why NEAR
 
-Deployment details, transactions and gas figures are in [docs/testnet-run.md](docs/testnet-run.md). Needs [near-cli-rs](https://github.com/near/near-cli-rs) for the read commands, Node 20+ for the script, and Rust with [cargo-near](https://github.com/near/cargo-near) for the tests.
+- **An unpatchable shared world.** The contract account has no access keys. Nobody, including its author, can change a rule, mint coin or move a stall. 1,000,000 coin existed at founding and `audit()` shows the same total every night since. The economy keeps running without a developer: villagers earn wages, merchants restock from their own money, rent and tax flow back to the Treasury.
+- **NFTs that hold money and stock.** A stall is a NEP-171 token (metadata, approvals, enumeration, payouts), and the token *is* the account: coin, goods, prices, reputation and spot are stored under the token id. Transfer it, and all of it goes along. Its picture and description are computed from the live stall. The founder gets a 5% royalty on every resale, on the row in coin and through `nft_payout` in NEAR.
+- **No-wallet play through scoped keys.** The browser's Ed25519 key signs `lantern-row:v1:<contract>:<nonce>:<actions>`; a pool of public function-call keys on a gas account relays it to `act`, which checks the signature. The relay keys can only call `act` and `advance_night`, so they cannot change anything a player did not sign. Players never see a transaction, a seed phrase or a gas fee, and a small *Proof* drawer shows judges the account, the token and every transaction hash.
+- **Cheap enough for a 20-second night.** An `act` with ten actions burns under 3 Tgas; the worst-case `advance_night` with a full row and 30 nights of catch-up burns 15 Tgas. Clients call `advance_night` themselves when a night is due, so the town is as alive as its visitors.
 
-**See the living world.** Do this:
+## Run it yourself
 
-```sh
-near contract call-function as-read-only lantern-row.testnet world json-args '{}' network-config testnet now
-```
-
-You see the current night, tonight's event and the next one, Dock prices, 12 villagers with wallets and wants, and the merchants' stock and prices.
-
-**Check that nobody can patch it.** Do this:
-
-```sh
-near account list-keys lantern-row.testnet network-config testnet now
-```
-
-You see no access keys, so nobody can sign for the contract account or replace its code.
-
-**Check that no coin ever appeared.** Do this:
+The client is a static site with no build step and no dependencies: `web/index.html`, CSS, and ES modules. Serve the repository root with any static server and open `/web/`:
 
 ```sh
-near contract call-function as-read-only lantern-row.testnet audit json-args '{}' network-config testnet now
+python3 -m http.server 8765 --bind 127.0.0.1
+# then open http://127.0.0.1:8765/web/
 ```
 
-You see `total` equal to `founding`: 1,000,000.
+It needs a browser with Ed25519 in WebCrypto: Chrome 137+, Safari 17+, Firefox 130+. The page has a strict Content-Security-Policy (`default-src 'self'`; connections only to the two testnet RPC hosts) and loads nothing from a CDN.
 
-**See the leaderboard and what a stall token looks like.** Do this:
+**Tests.** Unit tests for the client's logic and the NEAR layer (signing, borsh, key rotation, the action queue) run with Node 20+ and no install:
 
 ```sh
-near contract call-function as-read-only lantern-row.testnet leaderboard json-args '{"limit":10}' network-config testnet now
-near contract call-function as-read-only lantern-row.testnet nft_token json-args '{"token_id":"1"}' network-config testnet now
+node --test 'web/test/*.test.mjs'
 ```
 
-You see NPC merchants and players ranked by net worth, and a token whose metadata is computed from the stall's live state.
-
-**Play a real night from the command line**, with any testnet account of your own. Do this, replacing `you.testnet`:
+**End-to-end on testnet.** `scripts/e2e-browser.mjs` drives the real page in two headless Chrome profiles at once (one laptop, one phone) through the DevTools protocol: each founds or resumes a stall, restocks and reprices through the buttons, watches ten nights pass, reads the summary, opens the deed, lists the stall and withdraws it, and checks the other player on the leaderboard. It prints every transaction hash.
 
 ```sh
-near contract call-function as-transaction lantern-row.testnet play json-args '{"action":"[{\"found\":{\"name\":\"My Stall\"}}]"}' prepaid-gas '20 Tgas' attached-deposit '0 NEAR' sign-as you.testnet network-config testnet sign-with-keychain send
-near contract call-function as-read-only lantern-row.testnet player json-args '{"account":"you.testnet"}' network-config testnet now
+node scripts/e2e-browser.mjs --url http://127.0.0.1:8765/web/ --nights 10 --out e2e-out
 ```
 
-You see `minted` with your stall id, then your stall with 3,000 coin. Next, buy stock and set a price, replacing `7` with your stall id:
+The last run and its transactions are in [docs/testnet-run.md](docs/testnet-run.md).
 
-```sh
-near contract call-function as-transaction lantern-row.testnet play json-args '{"action":"[{\"buy\":{\"stall\":7,\"good\":0,\"qty\":5,\"max_cost\":1000}},{\"price\":{\"stall\":7,\"good\":0,\"price\":58}}]"}' prepaid-gas '20 Tgas' attached-deposit '0 NEAR' sign-as you.testnet network-config testnet sign-with-keychain send
-```
-
-Then end the night, once 20 seconds have passed since the last one ended. Anyone may do this:
-
-```sh
-near contract call-function as-transaction lantern-row.testnet advance_night json-args '{}' prepaid-gas '60 Tgas' attached-deposit '0 NEAR' sign-as you.testnet network-config testnet sign-with-keychain send
-near contract call-function as-read-only lantern-row.testnet night_log json-args '{}' network-config testnet now
-```
-
-You see every sale of the night that just ended, as `[villager, stall, good, price]`, perhaps some of them at your stall.
-
-**Run the tests and the simulation.** Do this:
-
-```sh
-cd contract
-cargo test
-cargo test --test economy_sim -- --nocapture --test-threads=1
-```
-
-You see all tests pass, then tables of hundreds of simulated nights: money, sales, prices, and how ten bot strategies end up. Results are in [docs/ECONOMY.md](docs/ECONOMY.md).
-
-**Build the contract.** `contract/build.sh` builds the wasm, checks it for local paths and prints its sha256, which is also in `contract/WASM_SHA256`.
-
-## Rules and API
-
-[SPEC.md](SPEC.md) holds the rules, the numbers and the full API for clients.
+**Contract.** `contract/` holds the Rust source, tests and economy simulation. `contract/build.sh` reproduces the deployed wasm hash. [SPEC.md](SPEC.md) has every rule, number and the full API; [docs/ECONOMY.md](docs/ECONOMY.md) has the simulation evidence.
 
 ## What is real and what is not
 
-- **Real, on NEAR testnet only:** the contract, the economy, the villagers' and merchants' wallets, the NFTs and every game action. Nothing here runs on mainnet.
-- **Not real money:** coin is an integer inside the contract. It has no value and is not a token. Testnet NEAR only pays for gas and storage.
-- **NPCs are rules, not AI.** Villagers and merchants follow the deterministic rules in [`contract/src/night.rs`](contract/src/night.rs). No model or AI service is involved at runtime.
-- **Simulated:** the economy evidence comes from bots driving the real contract code in the SDK's mock VM, not from people playing. Gas figures come from real testnet transactions.
-- **Not done:** the web client, and any play with real humans. The contract has not been audited.
-- **Public gas keys:** the client's function-call keys are deliberately public. Anyone can spend their allowance, which stops free play until someone refills it. They cannot touch game state, because every action needs the player's own signature. Details and other limits are in [SPEC.md section 14](SPEC.md#14-honest-limits).
+- **Testnet only.** The contract is `lantern-row.testnet`. Nothing runs on mainnet, and nothing here should.
+- **Play money.** Coin is an integer inside the contract. It has no value and is not a token. Testnet NEAR only pays gas and storage.
+- **The gas keys are public, on purpose.** They are in [`web/js/gas-keys.js`](web/js/gas-keys.js) with the reasoning. Anyone can spend their allowance, which stops free play until the pool is refilled. They cannot touch game state. The gas account's full-access key is not in the repository.
+- **Economy evidence comes from bots, not humans.** The tables in `docs/ECONOMY.md` come from scripted strategies driving the real contract code. They show the rules hold together; they do not show that people find it fun. The nights played by humans so far are the author's own.
+- **NPCs are rules, not AI.** Villagers and merchants follow deterministic rules in the contract. No model runs at play time.
+- **AI-generated code.** All code and documentation in this repository were written by an AI coding agent (Claude) from a human's game brief, during the hackathon window, and were not reviewed line by line by a human. The tests, the simulation, the testnet run and the end-to-end check are the evidence that it works. The contract has not been audited.
+- **Known limits** (randomness, griefing of licences, the account register, idle towns) are listed honestly in [SPEC.md section 14](SPEC.md#14-honest-limits).
 
-## How this was made
+The same author also entered the independent project ReplayCourt, https://github.com/replaycourt/replaycourt, in this hackathon.
 
-All code and documentation in this repository were written by an AI coding agent (Claude) working from a human's game brief, and were not reviewed line by line by a human. The tests, the simulation and the testnet run are the evidence that it works. Everything was written fresh for this project during the hackathon window.
+## Credits
 
-Libraries: [near-sdk](https://github.com/near/near-sdk-rs) and near-contract-standards (contract), ed25519-dalek and near-parameters (tests only). Node's standard library in the scripts.
+Original art, drawn in code (Canvas 2D and inline SVG). System fonts. Sounds synthesised in WebAudio. Libraries: near-sdk and near-contract-standards in the contract; ed25519-dalek and near-parameters in its tests only. The client and the scripts use nothing beyond the browser and Node's standard library.
 
 ## License
 

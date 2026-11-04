@@ -20,13 +20,13 @@ Everything here is NEAR testnet. Look up any transaction at `https://testnet.nea
 
 ## Gas keys
 
-Each of the 8 function-call keys on `lantern-row-gas.testnet` has an allowance of 1 NEAR and may only call `act` and `advance_night` on `lantern-row.testnet`. To see them:
+Each of the 14 function-call keys on `lantern-row-gas.testnet` has an allowance of 1 NEAR and may only call `act` and `advance_night` on `lantern-row.testnet`. To see them:
 
 ```sh
 near account list-keys lantern-row-gas.testnet network-config testnet now
 ```
 
-The keys are not in this repository yet. They become public with the web client. A transaction burns about 0.0003 NEAR, so 1 NEAR lasts about 3,000 transactions per key.
+The keys are public on purpose: they are in [`web/js/gas-keys.js`](../web/js/gas-keys.js), with the reasoning. A transaction burns about 0.0003 NEAR, so 1 NEAR lasts about 3,000 transactions per key. The pool started with 8 keys; 6 more were added for the web client with `scripts/setup-gas-pool.mjs`.
 
 ## Real nights played
 

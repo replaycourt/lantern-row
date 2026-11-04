@@ -3,3 +3,4 @@ target/
 node_modules/
 *.log
 .DS_Store
+e2e-out/
