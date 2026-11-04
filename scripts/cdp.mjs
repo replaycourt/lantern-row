@@ -53,6 +53,8 @@ export async function openPage(chrome, url) {
   const page = new Page(ws, chrome)
   await page.send('Page.enable')
   await page.send('Runtime.enable')
+  await page.send('Network.enable')
+  await page.send('Network.setCacheDisabled', { cacheDisabled: true }) // always the files on disk, never a stale copy
   if (chrome.mobile) {
     await page.send('Emulation.setDeviceMetricsOverride', { width: chrome.width, height: chrome.height, deviceScaleFactor: 2, mobile: true })
     await page.send('Emulation.setTouchEmulationEnabled', { enabled: true })

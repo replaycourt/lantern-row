@@ -153,7 +153,7 @@ export function toast(text, kind = '', ms = 3600) {
 
 export function showSummary(night, s) {
   const el = $('summary')
-  el.className = `summary ${s.mood}`
+  el.className = `summary mood-${s.mood}` // not the bare mood: ".good" is the goods card
   $('summary-night').textContent = `Night ${night}`
   $('summary-headline').textContent = s.headline
   $('summary-lines').innerHTML = s.lines.map((l) => `<li class="${esc(l.icon)}">${esc(l.text)}</li>`).join('')

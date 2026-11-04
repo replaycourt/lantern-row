@@ -109,6 +109,7 @@ export class GasPool {
 function friendly(err) {
   if (err instanceof FriendlyError) return err
   const t = String(err?.message ?? err)
+  console.info('chain', t.slice(0, 300))
   if (/InvalidNonce/.test(t)) return new FriendlyError('The street is busy; your order got mixed up in the queue. Trying again.', err)
   if (/NotEnoughAllowance|AccessKeyDoesNotExist/.test(t)) return new FriendlyError('The gas pool is running low. One more try with another key.', err)
   if (/TIMEOUT|timeout|Failed to fetch|NetworkError|http 5|abort/i.test(t)) return new FriendlyError('The network hiccupped. Nothing was lost; trying again.', err)

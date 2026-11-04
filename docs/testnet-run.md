@@ -46,6 +46,29 @@ The keys are public on purpose: they are in [`web/js/gas-keys.js`](../web/js/gas
 
 The stall went from net worth 3,006 to 6,537 in 40 nights, some of them idle. It stayed behind the merchants, who hold 16,000 to 24,000. `audit()` returned `total` equal to `founding` throughout. Some nights the stall sold nothing: after a long absence the villagers' memory had faded, and pricing 3% under a merchant they know was not enough at the back of the row.
 
+## Played through the web client
+
+`scripts/e2e-browser.mjs` drove the real page in two headless Chrome profiles at once (a 1366×820 laptop and a 390×844 phone with touch), each with its own browser-made key, against `lantern-row.testnet` on testnet. Both stalls already existed from an earlier run of the same script, so the keys in the profiles resumed them. Every step went through the page's own buttons; the script only read the page's state to check the result. Final run, nights 117 to 127:
+
+| step | laptop ("Alice Teahouse", stall 16) | phone ("Bobs Dumplings", stall 15) |
+|---|---|---|
+| resumed the stall from the stored key | 5,038 coin | 3,980 coin |
+| restock with one tap, then smart prices | stock 5/1/3/1/3 | stock 6/0/3/2/0 |
+| raised the tea price with + | 72 → 76 | 72 → 76 |
+| nights watched, summaries shown | 10, yes | 10, yes |
+| listed the deed at 4,321, then withdrew it, both confirmed by `world().listings` | yes | yes |
+| saw the other player on the leaderboard | yes | yes |
+| transactions, failures | 17, 0 | 21, 0 |
+| coin after 10 nights | 5,768 (+730) | 6,714 (+2,734) |
+
+20 of 20 checks passed. A Dock purchase was refused three times with "the Dock does not have that many tonight" because the other browser had bought first; the client clipped the quantity and sent the rest of the order again, which is what the refusal log shows. Two `advance_night` attempts lost a nonce race with the other tab and gave up quietly, because the other tab had already ended the night.
+
+`act`, 1 to 8 actions, 2.50 to 2.82 Tgas, for example `66XZrmrK76oq6bRL2yc68xJi3VRXdLNqdoUjf2tRMTvg`, `7Q2swy6tiE6vgsaiyUtiTeyBq4t2sGw3343YjBujmZyr`, `Djcxpgc6GHfLyhV1AQdsjfNrTwY9o3CAyEnJYak1FHFr`, `E9Ujwnt7zv7QPK4bryxnSQq7Vzbg7AtfRgcCTi2QQFPx`, `AF76SoSxToy1jXP74UG6DdzaLPPYshskr96E4qjcjsmC`, `6S34vxzcgivTep8hcSs9ShYwckVHm4g2Lg1sRoWqmaFt`, `CWRRnPpDECFcghc6bb9eBwkRmG98d6Yp7HM8QeYUSjD2` (laptop) and `6CcJQ3PZRvq8WsFTGSr5zqdbfZZ38wKc3TjhHtMCwWZk`, `DvFBKFYfCHhDgKTVDhNhGB6whXuD96LjR7ZFVuoQzVkB`, `8yqbsYwKbgvezqXYY5NksYRTowZ3ENorEkzssspaSeN9`, `Apj17DpnMFdkg9pujwV7oJRzCzkMZwChYgxxXbYexZyD`, `39rs4kajiruxeEQqSYYRUTXmhqJhnzEwxgsrJXbQCALn`, `BtDxEvXsACE8ujQpic6N4DwfoNGzWY61vRbS3ZN9bVLo`, `BSaVxTrRbGh1hMgn9MrNa8qqXjFhH5THq8J9fpLsPyY1`, `B5pcoRYwtjWB6zuBvrPv76VxHQwugVUkiPzkW83WvosV`, `8AZ6MiVsMfeqYtSB1M19u6gewiMhSpUNYytQF1Apbd7P`, `EvZUCiFTMrmRC8NTFR2HHrhVzNRtiEjgGGTcpfLMwgax`, `FKpgezH5gAm17GJskaSmBK8t1jFbT4SNqnhm1xyS1o5i` (phone).
+
+`advance_night` from the browsers, 1.83 Tgas when the night was not due yet or was already ended, 4.6 to 4.9 Tgas for one night, 7.67 Tgas for a catch-up: `E8MCY5wwHD7JoBMPjRUjyfEzWnedAW828VeZ8EtYajDw`, `FocCKhmWU27XHxnTSWBPxkvEdy29DACpu9RGF4y59fCm`, `FkKtfyT3H59Hb8zK5mRi8qhTY5cSDaZL2WLWY2b9WkwB`, `5u3neetQHT6w5WsGUqoNG2nVyaAFyEeDQhFKi6y3ym2N`, `9pquyCjpaypV2upagUTJzRPdDgXAb4kZ9Eh9b4PqQWs6`, `AKD74xgUpdQkc6FD5N5ZYm71NDjrcmUWa4oZSYegrPp8`, `DygqnHYcp3FoeUbo6MBa3xdSZ9pnyYvSDVPQECoBpEHY`, `AqwpzZixLVRj2ayFM74Y34BbTGeQx2V3x8AohpmdVQUD`, `3wWEKzgHSKCqVbXfVgseohitCQoFWEhGtzzW7kNxU3vA`, `BgkSKW9NdgUCfrjgPc3TfHnucLLm4oxct3yVYgcWpgUu`, `G9vP3hYomD5et7HyJLVpUppFFaYXQfvaUWDSrVUDzV1S`, `5E8HD8XKVFMZCL5j7a2QuFCN2FDwiXwdhDeyyuv6t33C`, `8fYiJ8ju7NBJT27WVgbEiHwgmFvP88b5mroyfHVjBE13`, `opafEXJtUAKPFGpSg185fYGKUQRYFBCsnRBEqGHN2bd`, `2sC1CR1KcJbH1ojgoqW8Lj1RgFw7xBp9ScQCEDFqjhVj`, `A54PugTgaYh8ypfwGBXJJ8WiNsY57jedZo64mbsJiRLd`, `C6hLktjXa7vL37j7D9n2JNcqmFqHGBMEXka8FDQTYwFU`, `B4944YWQMY3JAGovdX7PgM299QDfvpBUsvJ2jSsp13RJ`, `ATatqYVv9hYCXWZGVci2FbJLheupWgdb9Q9W1UNCLctR`, `G782jM1ZdRE3amCH8vzjH1gKpDLz4g85fCixJYf4SYCt`.
+
+Earlier runs of the same script founded the two stalls (`found` through the title screen's button) and played 2 and 10 nights each; they are what surfaced the bugs the client now handles (a lagging view rolling back an optimistic purchase, and a refused buy aborting the rest of an order).
+
 ## The token as an account
 
 `scripts/testnet-nft-demo.mjs`, three wallet-free players (A, B, C), stall 11 founded by B:

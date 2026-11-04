@@ -105,9 +105,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--amber); out
 .hint::after { content: ""; position: absolute; left: 50%; bottom: -9px; width: 18px; height: 18px; background: var(--paper); transform: translateX(-50%) rotate(45deg); border-radius: 3px; }
 
 /* ---- summary ---- */
-.summary { position: absolute; top: calc(var(--hud-h) + 44px); left: 50%; transform: translateX(-50%); width: min(460px, 92vw); background: var(--paper); color: var(--ink); border-radius: 18px; padding: 12px 16px 12px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5); z-index: 11; animation: drop 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; border-top: 6px solid var(--amber); }
-.summary.flat { border-top-color: #9b8bc7; }
-.summary.bad { border-top-color: var(--rose); }
+.summary { position: absolute; top: calc(var(--hud-h) + 44px); left: 50%; transform: translateX(-50%); width: min(460px, 92vw); background: var(--paper); color: var(--ink); border-radius: 18px; padding: 12px 16px 12px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5); z-index: 11; border-top: 6px solid var(--amber); }
+.summary-head b { animation: bump 0.4s ease; display: inline-block; }
+.summary.mood-flat { border-top-color: #9b8bc7; }
+.summary.mood-bad { border-top-color: var(--rose); }
 .summary-head { display: flex; align-items: baseline; gap: 10px; padding-right: 30px; }
 .summary-night { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.6; font-weight: 800; }
 .summary-head b { font-size: 1.1rem; }
