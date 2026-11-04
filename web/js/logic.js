@@ -79,8 +79,11 @@ export function suggestPrices(world, cfg, stall) {
     let price, reason
     if (rivals.length) {
       const cheapest = Math.min(...rivals)
-      price = Math.floor((cheapest * 97) / 100)
-      reason = `just under the cheapest rival (${cheapest})`
+      // Villagers favour stalls they remember and stalls with reputation (up to 8% and 10%), so a new
+      // stall has to undercut harder than an established one to win the sale.
+      const under = stall.rep < 300 ? 88 : stall.rep < 450 ? 94 : 97
+      price = Math.floor((cheapest * under) / 100)
+      reason = under === 97 ? `just under the cheapest rival (${cheapest})` : `well under the cheapest rival (${cheapest}) until villagers know you`
     } else {
       price = ceiling
       reason = 'nobody else sells it tonight'
@@ -161,7 +164,10 @@ export function coalesce(actions, max = 16) {
     }
     out.push(a)
   }
-  return out.slice(0, max)
+  // Prices first: they are never refused for lack of money or supply, so a refused buy cannot stop them.
+  const prices = out.filter((a) => a.price)
+  const others = out.filter((a) => !a.price)
+  return [...prices, ...others].slice(0, max)
 }
 
 /** The stall as it will look once these actions apply, for optimistic UI. */

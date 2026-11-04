@@ -88,7 +88,7 @@ export class Scene {
     this.canvas.width = Math.round(this.W * this.dpr)
     this.canvas.height = Math.round(this.H * this.dpr)
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
-    this.cam.scale = clamp(this.W / 1500, 0.6, 1.15)
+    this.cam.scale = this.W < 720 ? 0.78 : clamp(this.W / 1500, 0.6, 1.15)
     if (this.H < 560) this.cam.scale = Math.min(this.cam.scale, this.H / 640)
   }
 

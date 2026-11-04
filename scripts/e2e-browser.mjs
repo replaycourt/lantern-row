@@ -125,12 +125,14 @@ async function player(who, { port, mobile }) {
     }
     await page.eval(() => (document.querySelector('#list-price').value = '4321'))
     await page.click('[data-list]')
-    await sleep(8000)
-    const listedOnChain = await page.eval(async () => {
-      const c = globalThis.__lantern.client
-      const w = await c.world()
-      return w.listings.find((l) => l[0] === globalThis.__lantern.state.stall.id)?.[1] ?? null
-    })
+    let listedOnChain = null
+    for (let i = 0; i < 12 && listedOnChain === null; i++) {
+      await sleep(2500)
+      listedOnChain = await page.eval(async () => {
+        const w = await globalThis.__lantern.client.world()
+        return w.listings.find((l) => l[0] === globalThis.__lantern.state.stall.id)?.[1] ?? null
+      })
+    }
     step(who, 'deed listed for sale (on chain)', listedOnChain === 4321, `listing ${listedOnChain}`)
     await page.click('#btn-deed')
     await page.waitFor(() => document.querySelector('[data-unlist]'), 20000)

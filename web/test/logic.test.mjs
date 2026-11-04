@@ -53,15 +53,20 @@ test('suggested prices undercut the cheapest rival with stock and respect floors
   // tea: cheapest rival 99 -> 96, capped at 140% of fair = 84, festival on tea -> +25% = 105
   assert.equal(s[0].price, 105)
   assert.match(s[0].reason, /festival/)
-  // lamp oil: rivals 127 and 116 -> 116*0.97 = 112, ceiling 126, floor max(65, 85) = 85
-  assert.equal(s[1].price, 112)
-  // dumplings: Uncle sells at 57 -> 55; floor max(28, 38) = 38; ceiling 56
-  assert.equal(s[2].price, 55)
-  // silk: rival 387 -> 375, ceiling 490, floor 332
-  assert.equal(s[3].price, 375)
-  // charms: rivals 258, 273 -> 250, ceiling 252
-  assert.equal(s[4].price, 250)
+  // a new stall (rep 200) undercuts by 12%: lamp oil rivals 127 and 116 -> 116*0.88 = 102, floor max(65, 85) = 85
+  assert.equal(s[1].price, 102)
+  assert.match(s[1].reason, /until villagers know you/)
+  // dumplings: Uncle sells at 57 -> 50; floor max(28, 38) = 38; ceiling 56
+  assert.equal(s[2].price, 50)
+  // silk: rival 387 -> 340, floor max(222, 332) = 332, ceiling 490
+  assert.equal(s[3].price, 340)
+  // charms: rivals 258, 273 -> 227, ceiling 252
+  assert.equal(s[4].price, 227)
   for (let g = 0; g < 5; g++) assert.ok(s[g].price <= cfg.goods[g].max_price)
+  // an established stall (rep 600) only shaves 3% off
+  const est = L.suggestPrices(world, cfg, { ...me, rep: 600 })
+  assert.equal(est[1].price, 112)
+  assert.equal(est[4].price, 250)
 })
 
 test('suggested prices without rivals fall back to a fair price', () => {

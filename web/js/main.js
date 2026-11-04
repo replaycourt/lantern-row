@@ -31,7 +31,7 @@ const S = {
   pollTimer: null,
   failures: 0,
   foundingName: null,
-  refusalRetries: 1,
+  refusalRetries: 3,
 }
 
 const client = new Client()
@@ -286,8 +286,9 @@ async function advance() {
     if (text) U.toast(text, 'warn', 7000)
     schedulePoll(50)
   } catch (e) {
-    console.warn('advance', e)
-    if (e instanceof FriendlyError) U.setStatus('error', e.message)
+    // Another tab usually ended the night first; only a dry gas pool is worth telling the player.
+    console.info('advance', e?.message)
+    if (e instanceof FriendlyError && /gas pool/.test(e.message)) U.setStatus('error', e.message)
   } finally {
     S.advancing = false
   }
@@ -443,7 +444,7 @@ function onRestock() {
 }
 
 function push(...actions) {
-  if (!queue.busy) S.refusalRetries = 1
+  if (!queue.busy) S.refusalRetries = 3
   S.stall = L.project(S.stall, actions, S.world, S.cfg)
   for (const a of actions) {
     const g = a.price?.good ?? a.buy?.good
@@ -643,6 +644,7 @@ function renderGoods() {
 }
 
 function tutorial() {
+  if (S.walking) return
   const step = L.tutorialStep(S.progress)
   if (!step) return U.hideHint()
   U.showHint(typeof step.text === 'function' ? step.text(S.progress) : step.text)
