@@ -269,7 +269,7 @@ async function poll() {
     S.failures = 0
     const nightBefore = S.world?.night ?? world.night
     applyWorld(world)
-    if (world.night > nightBefore) await onNightChanged(world, world.night - nightBefore)
+    if (world.night > nightBefore) queueNight(world, world.night - nightBefore)
     else {
       const spotBefore = scene.stallById.get(S.stall?.id)?.spot
       scene.setWorld(world, S.cfg)
@@ -359,6 +359,21 @@ async function refreshBoard() {
 
 // ---- nights -------------------------------------------------------------------------------------
 
+// Nights are played one after another. If the chain moved on while a walk was playing, the nights
+// that piled up are shown as one: the latest log walks, the report counts them all.
+let nightChain = Promise.resolve()
+function queueNight(world, nights) {
+  S.pendingNight = { world, nights: (S.pendingNight?.nights ?? 0) + nights }
+  nightChain = nightChain
+    .then(async () => {
+      const p = S.pendingNight
+      if (!p) return
+      S.pendingNight = null
+      await onNightChanged(p.world, p.nights)
+    })
+    .catch((e) => console.warn('night', e))
+}
+
 async function onNightChanged(world, nights = 1) {
   sound.chime()
   clearTimeout(S.summaryTimer)
@@ -387,6 +402,7 @@ async function onNightChanged(world, nights = 1) {
   await refreshMeNow()
   const summary = L.summariseNight({ log, stall: S.stall, before: S.prevStall, world: S.world, cfg: S.cfg, villagers: S.world.villagers, nights })
   const outcome = S.lastCall && S.lastCall.accepted != null ? L.judgeCall(S.lastCall.call, { log, stall: S.stall, before: S.prevStall, world: S.world, cfg: S.cfg, accepted: S.lastCall.accepted }) : null
+  S.lastOutcome = outcome
   U.showSummary(log.night, summary, outcome)
   U.$('summary').classList.remove('hidden')
   if (outcome?.met) sound.fanfare()
@@ -407,7 +423,9 @@ async function onNightChanged(world, nights = 1) {
 function offerCall() {
   if (S.walking || !S.stall) return
   const log = S.world.last && S.world.last.night === S.world.night - 1 ? S.world.last : null
-  const call = L.nightlyCall({ world: S.world, cfg: S.cfg, stall: S.stall, log, fc: S.fc })
+  // a call that was taken last night and did not pay is not asked again tonight
+  const avoid = S.lastCall?.accepted && S.lastOutcome?.met === false ? { kind: S.lastCall.call.kind, good: S.lastCall.call.good } : null
+  const call = L.nightlyCall({ world: S.world, cfg: S.cfg, stall: S.stall, log, fc: S.fc, avoid })
   S.call = call ? { call, accepted: null, night: S.world.night } : null
   clearTimeout(S.summaryTimer)
   if (call) U.showCall(call, { alone: !U.summaryVisible() })

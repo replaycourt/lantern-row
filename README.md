@@ -2,7 +2,7 @@
 
 # Lantern Row
 
-**A night market that never closes.** Run a stall on a shared, lantern-lit street where twelve villagers with their own wallets, tastes and memories walk the row every 20 seconds and buy what they need. Price your tea right, out-trade The Quiet Kettle, grow your stall, and sell it whole when you are done. The entire economy is one NEAR contract with no owner and no way to patch it. Built at NEAR HACKATHON for the `games` and `nfts` tracks.
+**Run a stall, price your goods, out-trade the merchants.** A night market that never closes: a shared, lantern-lit street where twelve villagers with their own wallets, tastes and memories walk the row every 20 seconds and buy what they need. Every night brings one call to make: stock up before the festival, wait for the Dock to get cheap, undercut The Quiet Kettle on what everyone wants tonight. Grow your stall, and sell it whole when you are done. The entire economy is one NEAR contract with no owner and no way to patch it. Built at NEAR HACKATHON for the `games` and `nfts` tracks.
 
 **Play now:** https://replaycourt.github.io/lantern-row/web/ (testnet, play money, no sign-up)
 
@@ -11,15 +11,15 @@
 ## How to play
 
 1. **Tap *Open your stall*.** See a stall with your name on it appear on the street, with 3,000 coin inside. No wallet, no sign-up: your browser made a key, and that key owns the stall.
-2. **Tap *Restock*.** See tea, oil and dumplings land on your counter, bought from the Dock at tonight's prices.
-3. **Tap *Smart prices*, or nudge a price with − and +.** See the price appear on your counter, just under the cheapest merchant.
-4. **Wait for the clock.** See Bao, Cora and the others walk the row, stop at stalls, and buy, with coins flying to your stall and little remarks: "At last, tea!" or "Too dear!"
-5. **Read the night summary.** See what sold, who walked away and why, and what it cost you in rent.
-6. **Watch the banner.** See a festival or a storm announced a night ahead, with bunting and fireworks or rain and dim lanterns when it comes. Stock up before a festival; price up in a storm.
-7. **Open *Deed*.** See your stall as the token it is: its coin, goods, reputation and spot. Grow it, move it nearer the gate, or list it for sale and watch the "FOR SALE" sign go up.
-8. **Open *Ranks*.** See yourself among the six merchants and every other player who ever opened a stall here. Open the page in a second browser and you will find your first stall already on the street.
+2. **Tap *Restock*.** See tea, oil and dumplings land on your counter, bought from the Dock at tonight's prices and priced to sell. Each card says how many villagers want that good tonight and about how many will buy at your price; nudge a price with − and + and watch the number move.
+3. **Wait for the clock.** See Bao, Cora and the others walk the row, stop at stalls, and buy, with coins flying to your stall and little remarks: "At last, tea!" or "Too dear!"
+4. **Read the night report.** See what sold, what sold out while others still wanted it, who walked away and why, and what it cost you in rent.
+5. **Make tonight's call.** Under the report, one decision with two buttons: "Festival of silk starts next night: stock 3 silk?", "Bumper dumplings tomorrow: wait for cheap dumplings?", "11 want dumplings and the merchants hold 4: stock 6 at 43?" The next report says how it went, with a stamp when it paid off. Tap Restock alone and the stall still does fine; the call is where the coin is.
+6. **Watch the banner.** See a festival or a storm named a night ahead, with bunting and fireworks or rain and dim lanterns when it comes.
+7. **Open *Deed*.** See your stall as the token it is, with the picture the contract draws for it: its coin, goods, reputation and spot. Grow it, move it nearer the gate, or list it for sale and watch the "FOR SALE" sign go up.
+8. **Open *Ranks*.** See yourself among the six merchants and the other players on the row. Open the page in a second browser and you will find your first stall already on the street.
 
-Two minutes is enough to learn it. The merchants are the thing to beat: they reprice by readable rules (tap any stall to see their prices and why), so a watchful player undercuts them.
+Two minutes is enough to learn it. The merchants are the thing to beat: they reprice by readable rules (tap any stall to see their prices and why), and the client reads the villagers the way the contract does, so a watchful player undercuts them where it counts.
 
 ## Why NEAR
 
@@ -45,7 +45,7 @@ It needs a browser with Ed25519 in WebCrypto: Chrome 137+, Safari 17+, Firefox 1
 node --test 'web/test/*.test.mjs'
 ```
 
-**End-to-end on testnet.** `scripts/e2e-browser.mjs` drives the real page in two headless Chrome profiles at once (one laptop, one phone) through the DevTools protocol: each founds or resumes a stall, restocks and reprices through the buttons, watches ten nights pass, reads the summary, opens the deed, lists the stall and withdraws it, and checks the other player on the leaderboard. It prints every transaction hash.
+**End-to-end on testnet.** `scripts/e2e-browser.mjs` drives the real page in two headless Chrome profiles at once (one laptop, one phone) through the DevTools protocol: each founds or resumes a stall, restocks and reprices through the buttons, watches ten nights pass, answers tonight's call, reads the report and how the call went, opens the deed, lists the stall and withdraws it, and checks the other player on the leaderboard. It prints every transaction hash.
 
 ```sh
 node scripts/e2e-browser.mjs --url http://127.0.0.1:8765/web/ --nights 10 --out e2e-out

@@ -105,7 +105,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--amber); out
 .hint::before { content: ""; position: absolute; left: 14px; top: 50%; width: 22px; height: 22px; transform: translateY(-50%); border-radius: 50%; background: radial-gradient(circle at 40% 35%, #ffe9a8, #ff9a3c 70%); box-shadow: 0 0 14px rgba(255, 154, 60, 0.8); }
 
 /* ---- summary ---- */
-.summary { position: absolute; top: calc(var(--hud-h) + 14px); left: 12px; width: min(440px, 92vw); background: var(--paper); color: var(--ink); border-radius: 18px; padding: 12px 16px 12px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5); z-index: 11; border-top: 6px solid var(--amber); }
+.summary { position: absolute; top: calc(var(--hud-h) + 14px); left: 12px; width: min(440px, 92vw); max-height: calc(100vh - var(--hud-h) - var(--panel-h) - 20px); overflow: auto; background: var(--paper); color: var(--ink); border-radius: 18px; padding: 12px 16px 12px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5); z-index: 11; border-top: 6px solid var(--amber); }
 .summary-head b { animation: bump 0.4s ease; display: inline-block; }
 .summary.mood-flat { border-top-color: #9b8bc7; }
 .summary.mood-bad { border-top-color: var(--rose); }
@@ -217,8 +217,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--amber); out
 .board { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .board li { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; background: rgba(0, 0, 0, 0.04); }
 .board li.me { background: var(--amber); font-weight: 800; }
-.board li.npc .who::after { content: " · merchant"; font-weight: 500; opacity: 0.6; font-size: 0.8rem; }
-.board li.player .who::after { content: " · player"; font-weight: 500; opacity: 0.6; font-size: 0.8rem; }
+.board li.npc .who small::after { content: " · merchant"; }
+.board li.player .who small::after { content: " · player"; }
 .board .rank { font-weight: 800; font-size: 1.1rem; text-align: center; }
 .board .who { font-weight: 700; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .board .who small { display: block; font-weight: 500; opacity: 0.65; font-size: 0.75rem; }

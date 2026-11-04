@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // End-to-end check of the web client against NEAR testnet, through the real page in headless Chrome.
 // Two browser profiles play at once: each founds a stall (or returns to one), restocks, changes
-// prices, watches nights pass, reads the night summary, opens the deed and lists the stall.
+// prices, watches nights pass, answers tonight's call, reads the night summary and how the call
+// went, opens the deed and lists the stall.
 //
 //   node scripts/e2e-browser.mjs --url http://127.0.0.1:8765/web/ --nights 10 --out <dir> [--profiles <dir>]
 //
@@ -21,7 +22,7 @@ const OUT = arg('out', join(process.cwd(), 'e2e-out'))
 const PROFILES = arg('profiles', join(OUT, 'profiles'))
 mkdirSync(OUT, { recursive: true })
 
-const results = { nights: {}, txs: {}, steps: [], failures: [] }
+const results = { nights: {}, txs: {}, calls: {}, steps: [], failures: [] }
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 function step(who, name, ok, info = '') {
   results.steps.push({ who, name, ok, info })
@@ -59,7 +60,17 @@ async function player(who, { port, mobile }) {
     await page.waitFor(() => globalThis.__lantern.state.pendingGoods.size === 0 && globalThis.__lantern.client.txs.some((t) => t.kind === 'act'), 60000, 500)
     await sleep(2500)
     s = await state(page)
-    const stocked = s.stall.stock.reduce((a, b) => a + b, 0)
+    let stocked = s.stall.stock.reduce((a, b) => a + b, 0)
+    if (stocked === 0) {
+      // the other browser may have emptied the Dock first; a player would simply tap again
+      log(`[${who}] the Dock was empty, tapping Restock again`)
+      await sleep(4000)
+      await page.click('#btn-restock')
+      await page.waitFor(() => globalThis.__lantern.state.pendingGoods.size === 0, 60000, 500)
+      await sleep(2500)
+      s = await state(page)
+      stocked = s.stall.stock.reduce((a, b) => a + b, 0)
+    }
     step(who, 'restock through the UI', stocked > before.stock.reduce((a, b) => a + b, 0) || stocked > 0, `stock ${JSON.stringify(s.stall.stock)} prices ${JSON.stringify(s.stall.price)}`)
 
     // change one price with the + button
@@ -71,12 +82,17 @@ async function player(who, { port, mobile }) {
     step(who, 'price change through the UI', s.stall.price[0] !== p0 && s.stall.price[0] > 0, `tea ${p0} -> ${s.stall.price[0]}`)
     await shot('priced')
 
-    // watch nights pass
+    // watch nights pass, answer tonight's call when it comes
     let seen = 0
     let summaries = 0
+    let calls = 0
+    let answered = 0
+    let judged = 0
     let lastNight = s.night
     let midShot = false
     let summaryShot = false
+    let callShot = false
+    let lastCallNight = -1
     const t0 = Date.now()
     while (seen < NIGHTS && Date.now() - t0 < NIGHTS * 45000 + 60000) {
       await sleep(midShot ? 1000 : 400)
@@ -98,7 +114,7 @@ async function player(who, { port, mobile }) {
           await page.click('#btn-restock').catch(() => {})
         }
       }
-      const vis = await page.eval(() => !document.getElementById('summary').classList.contains('hidden') && document.getElementById('summary-headline').textContent)
+      const vis = await page.eval(() => !document.getElementById('summary').classList.contains('hidden') && !document.getElementById('summary-report').classList.contains('hidden') && document.getElementById('summary-headline').textContent)
       if (vis && !summaryShot) {
         summaries++
         await shot('summary')
@@ -106,9 +122,34 @@ async function player(who, { port, mobile }) {
         const lines = await page.eval(() => [...document.querySelectorAll('#summary-lines li')].map((l) => l.textContent))
         log(`[${who}] summary: ${vis} | ${lines.join(' | ')}`)
       } else if (vis) summaries++
+      const outcome = await page.eval(() => !document.getElementById('summary').classList.contains('hidden') && !document.getElementById('summary-outcome').classList.contains('hidden') && document.getElementById('summary-outcome').textContent)
+      if (outcome && judged === 0) {
+        log(`[${who}] call judged: ${outcome}`)
+        await shot('summary-judged')
+      }
+      if (outcome) judged++
+      const call = await page.eval(() => {
+        const s = globalThis.__lantern.state
+        return s.call && !document.getElementById('summary-call').classList.contains('hidden') ? { night: s.call.night, kind: s.call.call.kind, title: s.call.call.title, label: s.call.call.accept.label, accepted: s.call.accepted } : null
+      })
+      if (call && call.night !== lastCallNight && call.accepted == null) {
+        lastCallNight = call.night
+        calls++
+        if (!callShot) {
+          await shot('call')
+          callShot = true
+        }
+        log(`[${who}] call on night ${call.night}: ${call.kind} "${call.title}" -> ${call.label}`)
+        // accept every other call, skip the rest: both paths get judged
+        await page.click(calls % 2 ? '#call-accept' : '#call-decline').catch(() => {})
+        answered++
+      }
     }
+    results.calls[who] = { calls, answered, judged }
     step(who, `${NIGHTS} nights observed`, seen >= NIGHTS, `${seen} nights, ${summaries} summary sightings`)
     step(who, 'night summary shown', summaries > 0)
+    step(who, 'tonight\'s call offered and answered', calls > 0 && answered === calls, `${calls} calls, ${answered} answered`)
+    step(who, 'call judged in the next report', judged > 0, `${judged} judged sightings`)
 
     // the deed: open, list, verify on chain, withdraw
     await page.click('#btn-deed')

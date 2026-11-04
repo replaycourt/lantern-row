@@ -224,6 +224,13 @@ export class Scene {
 
   /** Plays a night log. Resolves when the last villager has left. */
   playNight(log, { duration = 11 } = {}) {
+    // a walk still playing is cut short, never left hanging
+    if (this.walk) {
+      const old = this.walk
+      this.walk = null
+      this.actors = []
+      old.resolve?.()
+    }
     const scripts = buildWalk(log)
     const n = Math.max(1, scripts.length)
     const stagger = Math.min(0.75, Math.max(0.25, (duration - 5) / n))

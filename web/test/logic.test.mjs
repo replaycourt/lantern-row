@@ -327,7 +327,12 @@ test('tonight\'s call: one decision a night, from the rules', () => {
   // a storm on oil next night
   const storm = L.nightlyCall({ world: { ...quiet, event_left: 1, event_next: { storm: { good: 1 } } }, cfg, stall: me })
   assert.equal(storm.kind, 'storm-stock')
-  assert.equal(storm.accept.actions[0].buy.qty, 7)
+  assert.equal(storm.accept.actions[0].buy.qty, 5) // 1.5 x the mix, but only one villager wants oil: the mix itself
+  assert.equal(storm.priceThen, 52)
+  assert.match(storm.expect, /Saves about 130 coin/) // 5 x (78 - 52)
+  // a call taken last night that did not pay is not asked again
+  const again = L.nightlyCall({ world: quiet, cfg, stall: { ...me, stock: [0, 0, 1, 0, 0], price: [0, 0, 57, 0, 0] }, avoid: { kind: 'undercut', good: 2 } })
+  assert.ok(!again || again.kind !== 'undercut' || again.good !== 2)
 
   // bumper dumplings next night: wait
   const wait = L.nightlyCall({ world: { ...quiet, event_left: 1, event_next: { bumper: { good: 2 } } }, cfg, stall: me })
@@ -382,4 +387,7 @@ test('the call is judged by what the night log says', () => {
   assert.equal(wait.met, true)
   assert.match(wait.text, /fell from 23 to 16/)
   assert.equal(L.judgeCall(null, { log: lost }), null)
+  const storm = L.judgeCall({ kind: 'storm-stock', good: 1, priceThen: 52, accept: { actions: [{ buy: { stall: 14, good: 1, qty: 5, max_cost: 300 } }] } }, { log: lost, stall: me, cfg, accepted: true, world: { dock: [{}, { price: 80 }] } })
+  assert.equal(storm.met, true)
+  assert.match(storm.text, /up from 52 to 80; you bought 5 before, saving about 140/)
 })

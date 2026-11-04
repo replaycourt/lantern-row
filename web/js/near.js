@@ -148,7 +148,7 @@ export function unbase64(s) {
 
 export class Rpc {
   /** @param {string[]} hosts in order of preference */
-  constructor(hosts, { timeoutMs = 15000, fetchImpl } = {}) {
+  constructor(hosts, { timeoutMs = 9000, fetchImpl } = {}) {
     this.hosts = hosts
     this.active = 0
     this.timeoutMs = timeoutMs
