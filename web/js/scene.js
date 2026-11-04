@@ -329,12 +329,12 @@ export class Scene {
 
   /** On the title screen, a few villagers stroll past so the street never looks dead. */
   stepStrollers(dt) {
-    if (!this.title || this.reduced) {
+    if (this.reduced || this.walk) {
       this.strollers = []
       return
     }
     const half = this.W / 2 / this.cam.scale + 120
-    while (this.strollers.length < 4) {
+    while (this.strollers.length < (this.title ? 4 : 2)) {
       const id = Math.floor(Math.random() * 12)
       const info = this.villagersInfo[id] ?? { name: '', trade: '' }
       const dir = Math.random() < 0.7 ? 1 : -1
@@ -491,6 +491,7 @@ export class Scene {
     this.drawLampPosts()
     if (this.event.kind === 'festival') this.drawBunting()
     this.drawGate()
+    this.drawDock()
     for (const s of this.stalls) this.drawStall(s)
     for (const a of this.strollers) this.drawVillager(a)
     for (const a of this.actors) if (a.visible) this.drawVillager(a)
@@ -755,6 +756,48 @@ export class Scene {
     ctx.font = `bold ${13 * k}px ${FONT}`
     ctx.textAlign = 'center'
     ctx.fillText('LANTERN ROW', x, top + 32 * k)
+  }
+
+  /** The Dock at the far end of the row: a shed, crates and a lantern. Villagers never go there; the Dock sells to stalls. */
+  drawDock() {
+    const { ctx } = this
+    const k = this.cam.scale
+    const x = this.sx(SPOTS * SPOT_W + 40)
+    if (x < -260 * k || x > this.W + 260 * k) return
+    const base = this.sy(0)
+    const top = this.sy(-170)
+    ctx.fillStyle = '#2a1f33'
+    ctx.fillRect(x - 90 * k, top + 30 * k, 180 * k, base - top - 30 * k)
+    ctx.fillStyle = '#3a2a40'
+    ctx.beginPath()
+    ctx.moveTo(x - 104 * k, top + 32 * k)
+    ctx.lineTo(x, top - 12 * k)
+    ctx.lineTo(x + 104 * k, top + 32 * k)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = '#1b1426'
+    ctx.fillRect(x - 28 * k, base - 70 * k, 56 * k, 70 * k)
+    this.paperLantern(x + 60 * k, top + 60 * k, 9 * k, '#ffb347', 0.9)
+    // crates
+    const crate = (cx, cy, s) => {
+      ctx.fillStyle = '#7a5a33'
+      ctx.fillRect(cx - s / 2, cy - s, s, s)
+      ctx.strokeStyle = '#4a3620'
+      ctx.lineWidth = Math.max(1, 1.5 * k)
+      ctx.strokeRect(cx - s / 2, cy - s, s, s)
+      ctx.beginPath()
+      ctx.moveTo(cx - s / 2, cy - s)
+      ctx.lineTo(cx + s / 2, cy)
+      ctx.stroke()
+    }
+    crate(x - 70 * k, base, 26 * k)
+    crate(x - 44 * k, base, 26 * k)
+    crate(x - 57 * k, base - 26 * k, 26 * k)
+    crate(x + 86 * k, base, 22 * k)
+    ctx.fillStyle = '#f3dcb8'
+    ctx.font = `bold ${12 * k}px ${FONT}`
+    ctx.textAlign = 'center'
+    ctx.fillText('THE DOCK', x, top + 24 * k)
   }
 
   lanternGlow(x, y, r, a) {

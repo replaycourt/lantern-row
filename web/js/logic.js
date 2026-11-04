@@ -109,7 +109,7 @@ export function suggestPrices(world, cfg, stall) {
  * supply. Buys more of a good the night before a festival or storm for it. Returns
  * {items: [{good, qty, cost}], total}.
  */
-export function suggestRestock(world, cfg, stall, { reserve = 150 } = {}) {
+export function suggestRestock(world, cfg, stall, { reserve = Math.max(150, Math.floor(stall.money * 0.2)) } = {}) {
   let room = stall.capacity - stall.stock.reduce((a, b) => a + b, 0)
   let money = Math.max(0, stall.money - reserve)
   const soon = world.event_left === 1

@@ -31,6 +31,7 @@ const S = {
   pollTimer: null,
   failures: 0,
   foundingName: null,
+  refusalRetries: 1,
 }
 
 const client = new Client()
@@ -66,6 +67,12 @@ async function boot() {
     scene.setWorld(world, cfg)
     scene.cam.target = 2 * 210
     scene.cam.x = -2 * 210
+    // `?scene=festival|storm|quiet` dresses the title street for a screenshot (the social preview
+    // image is made this way). It never touches the game: entering the game reloads the real event.
+    const params = new URLSearchParams(location.search)
+    const dress = params.get('scene')
+    if (dress) scene.event = { kind: dress, good: 0 }
+    if (params.has('poster')) U.$('title').classList.add('poster')
     S.identity = await loadOrCreateIdentity()
     S.me = await client.setIdentity(S.identity)
     const players = world.row.filter((s) => !s.npc).length
@@ -86,7 +93,7 @@ async function boot() {
 
 function layout() {
   const panel = U.$('panel')
-  const bottom = panel.classList.contains('hidden') ? 0 : panel.getBoundingClientRect().height
+  const bottom = panel.classList.contains('hidden') ? Math.min(60, window.innerHeight * 0.06) : panel.getBoundingClientRect().height
   const hud = U.$('hud')
   const top = hud.classList.contains('hidden') ? 0 : hud.getBoundingClientRect().height
   scene.resize()
@@ -334,6 +341,7 @@ async function onNightChanged(world, nights = 1) {
   if (!log) return
   S.walking = true
   U.setStatus('busy', 'The villagers are walking the row…')
+  U.hideHint()
   renderGoods()
   await scene.playNight(log, { duration: reduced ? 4 : 11 })
   S.walking = false
@@ -435,6 +443,7 @@ function onRestock() {
 }
 
 function push(...actions) {
+  if (!queue.busy) S.refusalRetries = 1
   S.stall = L.project(S.stall, actions, S.world, S.cfg)
   for (const a of actions) {
     const g = a.price?.good ?? a.buy?.good
@@ -452,9 +461,30 @@ async function onFlush(out, batch) {
   const goods = [...new Set(batch.map((a) => a.price?.good ?? a.buy?.good).filter((g) => g != null))]
   if (out?.error) {
     const applied = out.applied ?? 0
-    console.info('refused', out.error, JSON.stringify(batch[applied]))
-    U.toast(explainRefusal(out.error, batch[applied]), 'warn', 5000)
+    const refused = batch[applied]
+    console.info('refused', out.error, JSON.stringify(refused))
+    U.toast(explainRefusal(out.error, refused), 'warn', 5000)
     sound.refuse()
+    // The contract stops at the first refused action. Send the rest again, with a buy that asked for
+    // more than the Dock has clipped to what is left, so one stale number does not spoil the order.
+    const rest = batch.slice(applied + 1)
+    if (S.refusalRetries > 0 && (rest.length || refused?.buy)) {
+      S.refusalRetries--
+      try {
+        const world = await client.world()
+        applyWorld(world)
+        const again = []
+        if (refused?.buy && /that many|supply/i.test(out.error)) {
+          const g = refused.buy.good
+          const qty = Math.min(refused.buy.qty, world.dock[g].left)
+          if (qty > 0) again.push({ buy: { ...refused.buy, qty, max_cost: Math.ceil(L.dockCost(S.cfg.goods[g], world.dock[g], qty) * 1.3) + 2 } })
+        }
+        again.push(...rest)
+        if (again.length) queue.push(...again)
+      } catch {
+        /* the player can tap again */
+      }
+    }
   } else {
     sound.stamp()
     U.stampCards(goods)

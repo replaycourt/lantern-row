@@ -79,11 +79,11 @@ async function player(who, { port, mobile }) {
     let summaryShot = false
     const t0 = Date.now()
     while (seen < NIGHTS && Date.now() - t0 < NIGHTS * 45000 + 60000) {
-      await sleep(1000)
+      await sleep(midShot ? 1000 : 400)
       const st = await state(page)
       if (!st) continue
       if (st.walking && !midShot) {
-        await sleep(2500)
+        await sleep(1800)
         await shot('mid-night')
         midShot = true
       }
