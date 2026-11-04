@@ -149,6 +149,35 @@ test('GasPool rotates to another key when one has no allowance, and re-reads a n
   assert.equal(f.calls.filter((c) => c === 'send_tx').length, 3)
 })
 
+test('GasPool looks a timed-out transaction up by hash instead of sending it twice', async () => {
+  const k1 = await N.newKey()
+  const keyStr = (k) => 'ed25519:' + N.b58encode(N.concat(k.seed, k.publicKey))
+  const landed = { result: { transaction: { hash: 'T2' }, transaction_outcome: { outcome: { gas_burnt: 1 } }, receipts_outcome: [], status: { SuccessValue: '' } } }
+  const f = fakeRpc({
+    query: [{ result: { nonce: 10 } }],
+    block: [{ result: { header: { hash: '11111111111111111111111111111111' } } }],
+    send_tx: [{ error: { name: 'REQUEST_TIMEOUT', cause: { name: 'TIMEOUT_ERROR' } } }],
+    tx: [{ error: { cause: { name: 'UNKNOWN_TRANSACTION' } } }, landed],
+  })
+  const rpc = new N.Rpc(['https://a'], { fetchImpl: f.fetch })
+  const pool = new GasPool(rpc, [{ public_key: N.nearPublicKey(k1), private_key: keyStr(k1) }], 'gas.testnet')
+  const t0 = Date.now()
+  const r = await pool.relay('c.testnet', 'act', {}, 1n)
+  assert.equal(r.hash, 'T2')
+  assert.equal(f.calls.filter((c) => c === 'send_tx').length, 1, 'sent once')
+  assert.equal(f.calls.filter((c) => c === 'tx').length, 2, 'asked twice for the status')
+  assert.ok(Date.now() - t0 >= 2000, 'waited between lookups')
+  // an http 408 counts as a timeout too
+  assert.ok(new N.RpcError('http 408', { http: 408, text: 'http 408' }).transient)
+  assert.ok(new N.RpcError('x', { cause: { name: 'UNKNOWN_TRANSACTION' } }).unknownTx)
+})
+
+test('txHash is the base58 sha256 of the unsigned transaction', async () => {
+  const tx = N.utf8('hello')
+  const h = await N.txHash(tx)
+  assert.equal(h, N.b58encode(crypto.createHash('sha256').update(tx).digest()))
+})
+
 test('GasPool gives a friendly error when every key is dead', async () => {
   const rpc = new N.Rpc(['https://a'], { fetchImpl: fakeRpc({}).fetch })
   const pool = new GasPool(rpc, [], 'gas.testnet')

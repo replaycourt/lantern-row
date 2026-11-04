@@ -125,6 +125,11 @@ export async function signTx(key, tx) {
   return base64(concat(tx, u8(0), sig))
 }
 
+/** The hash NEAR gives a transaction: sha256 of its unsigned bytes, in base58. Known before it is sent. */
+export async function txHash(tx) {
+  return b58encode(await sha256(tx))
+}
+
 export function base64(bytes) {
   if (typeof btoa === 'function') {
     let s = ''
@@ -168,7 +173,7 @@ export class Rpc {
           body: JSON.stringify({ jsonrpc: '2.0', id: String(this.calls), method, params }),
           signal: AbortSignal.timeout(this.timeoutMs),
         })
-        if (!r.ok && r.status !== 200) throw new RpcError(`http ${r.status}`, { http: r.status })
+        if (!r.ok && r.status !== 200) throw new RpcError(`http ${r.status}`, { http: r.status, text: `http ${r.status}` })
         const j = await r.json()
         if (j.error) {
           const text = JSON.stringify(j.error)
@@ -184,12 +189,12 @@ export class Rpc {
       } catch (e) {
         if (e instanceof RpcError && !e.transient) throw e
         lastErr = e
-        // Network trouble: move to the next host and try again.
+        // Network trouble: move to the next host, for the retry and for whoever calls next.
         if (this.hosts.length > 1) {
           this.active = (this.active + 1) % this.hosts.length
           this.onHostChange?.(this.hosts[this.active])
         }
-        await sleep(400 * (attempt + 1))
+        if (attempt < retries) await sleep(400 * (attempt + 1))
       }
     }
     throw lastErr
@@ -219,6 +224,16 @@ export class Rpc {
   async sendTx(signedBase64) {
     return this.call('send_tx', { signed_tx_base64: signedBase64, wait_until: 'EXECUTED_OPTIMISTIC' }, { retries: 0 })
   }
+
+  /** The outcome of a transaction already sent, or null while the chain does not know it yet. */
+  async txStatus(hash, sender) {
+    try {
+      return await this.call('tx', { tx_hash: hash, sender_account_id: sender, wait_until: 'EXECUTED_OPTIMISTIC' }, { retries: 0 })
+    } catch (e) {
+      if (e instanceof RpcError && (e.unknownTx || e.transient)) return null
+      throw e
+    }
+  }
 }
 
 export class RpcError extends Error {
@@ -226,7 +241,8 @@ export class RpcError extends Error {
     super(message)
     this.detail = detail
     const t = JSON.stringify(detail ?? '')
-    this.transient = /TIMEOUT_ERROR|UNKNOWN_BLOCK|INTERNAL_ERROR|UNAVAILABLE_SHARD|http 5/.test(t)
+    this.transient = /TIMEOUT_ERROR|UNKNOWN_BLOCK|INTERNAL_ERROR|UNAVAILABLE_SHARD|Timeout|http 5|http 408|http 429/.test(t)
+    this.unknownTx = /UNKNOWN_TRANSACTION|does not exist/.test(t)
     this.invalidNonce = /InvalidNonce/.test(t)
     this.expired = /Expired/.test(t)
     this.noAllowance = /NotEnoughAllowance|AccessKeyDoesNotExist|InvalidAccessKey/.test(t)

@@ -32,6 +32,11 @@ const S = {
   failures: 0,
   foundingName: null,
   refusalRetries: 3,
+  fc: null, // tonight's demand forecast, from the world view
+  call: null, // {call, accepted: true|false|null, night}: tonight's decision and what the player said
+  lastCall: null, // the call of the night that just ended, waiting to be judged
+  skipGood: null, // {good, night}: a good the player chose to wait on until the Dock gets cheap
+  summaryTimer: null,
 }
 
 const client = new Client()
@@ -51,12 +56,16 @@ async function boot() {
   scene.setTitle(true)
   scene.start()
   drawLogo(U.$('logo'))
-  window.addEventListener('resize', layout)
+  window.addEventListener('resize', () => {
+    layout()
+    if (S.started && S.stall) scene.focusStall(S.stall.id)
+  })
   layout()
   scene.onTap = onTapStall
   scene.onCoin = onCoin
   scene.onBubble = onBubble
-  client.rpc.onHostChange = (h) => U.toast(`Switched to a backup connection (${new URL(h).host}).`, 'warn')
+  let hostToasts = 0
+  client.rpc.onHostChange = (h) => S.started && hostToasts++ === 0 && U.toast(`Switched to a backup connection (${new URL(h).host}).`, 'warn')
   wireButtons()
 
   try {
@@ -117,8 +126,9 @@ function wireButtons() {
   })
   U.$('sheet-close').addEventListener('click', U.closeSheet)
   U.$('sheet-backdrop').addEventListener('click', U.closeSheet)
-  U.$('summary-close').addEventListener('click', U.hideSummary)
-  U.$('summary').addEventListener('click', (e) => e.target.id !== 'summary-close' && U.hideSummary())
+  U.$('summary-close').addEventListener('click', closeSummary)
+  U.$('call-accept').addEventListener('click', () => answerCall(true))
+  U.$('call-decline').addEventListener('click', () => answerCall(false))
   document.addEventListener('keydown', (e) => e.key === 'Escape' && (U.closeSheet(), U.hidePeek()))
   document.addEventListener('visibilitychange', () => schedulePoll(document.hidden ? 5000 : 300))
   renderSound()
@@ -141,6 +151,9 @@ async function startGame() {
       const name = L.cleanName(U.$('stall-name').value) || L.randomStallName()
       if (!L.validName(name)) throw new FriendlyError('Names take letters, digits, spaces, - and \', up to 24 of them.')
       S.foundingName = name
+      // A town nobody watched has nights to catch up on. Let it, before the stall exists, so the
+      // first night report is about the first night and not about back rent.
+      await catchUpBeforeFounding()
       U.$('title-line').textContent = 'The town clerk is writing your deed…'
       await found(name)
     }
@@ -152,6 +165,18 @@ async function startGame() {
     err.classList.remove('hidden')
     btn.disabled = false
     U.$('title-line').textContent = ''
+  }
+}
+
+async function catchUpBeforeFounding() {
+  try {
+    const world = await client.world()
+    if (!world.due) return
+    U.$('title-line').textContent = 'Waking the town…'
+    await client.advanceNight()
+    applyWorld(await client.world())
+  } catch (e) {
+    console.info('catch-up before founding', e?.message)
   }
 }
 
@@ -220,7 +245,10 @@ async function enterGame() {
   if (S.stall.stock.some((n) => n > 0)) S.progress.restocked = true
   if (S.stall.price.some((p) => p > 0)) S.progress.priced = true
   if (S.stall.customers > 0) S.progress.walked = 5
+  applyWorld(S.world)
   renderAll()
+  // A returning player knows the ropes: straight to tonight's call.
+  if (S.progress.walked) offerCall()
   tutorial()
   schedulePoll(50)
   setInterval(tickClock, 250)
@@ -242,7 +270,12 @@ async function poll() {
     const nightBefore = S.world?.night ?? world.night
     applyWorld(world)
     if (world.night > nightBefore) await onNightChanged(world, world.night - nightBefore)
-    else scene.setWorld(world, S.cfg)
+    else {
+      const spotBefore = scene.stallById.get(S.stall?.id)?.spot
+      scene.setWorld(world, S.cfg)
+      const spotNow = scene.stallById.get(S.stall?.id)?.spot
+      if (spotBefore !== spotNow) scene.focusStall(S.stall.id)
+    }
     if (world.due && !S.advancing && Date.now() - S.lastAdvanceTry > 4000) advance()
     pollCount++
     if (!queue.busy && pollCount % 2 === 0) await refreshMe()
@@ -260,7 +293,8 @@ async function poll() {
 function applyWorld(world) {
   S.world = world
   S.clockOffset = world.now_ms - Date.now()
-  if (S.started) {
+  if (S.started && S.stall) {
+    S.fc = L.forecast(world, S.cfg, S.stall)
     U.renderNight(world)
     U.renderEvent(world, S.cfg)
   }
@@ -314,7 +348,7 @@ async function refreshMe() {
 
 async function refreshBoard() {
   try {
-    const board = await client.leaderboard(60)
+    const board = L.visibleBoard(await client.leaderboard(60), S.stall.id)
     S.board = board
     S.rank = L.rankOf(board, S.stall.id)
     renderHud()
@@ -327,7 +361,11 @@ async function refreshBoard() {
 
 async function onNightChanged(world, nights = 1) {
   sound.chime()
+  clearTimeout(S.summaryTimer)
   U.hideSummary()
+  S.lastCall = S.call
+  S.call = null
+  if (S.skipGood && S.skipGood.night < world.night) S.skipGood = null
   S.prevStall = S.stall
   await refreshMeNow()
   scene.setWorld(world, S.cfg)
@@ -344,12 +382,14 @@ async function onNightChanged(world, nights = 1) {
   U.setStatus('busy', 'The villagers are walking the row…')
   U.hideHint()
   renderGoods()
-  await scene.playNight(log, { duration: reduced ? 4 : 11 })
+  await scene.playNight(log, { duration: reduced ? 4 : 9 })
   S.walking = false
   await refreshMeNow()
   const summary = L.summariseNight({ log, stall: S.stall, before: S.prevStall, world: S.world, cfg: S.cfg, villagers: S.world.villagers, nights })
-  U.showSummary(log.night, summary)
+  const outcome = S.lastCall && S.lastCall.accepted != null ? L.judgeCall(S.lastCall.call, { log, stall: S.stall, before: S.prevStall, world: S.world, cfg: S.cfg, accepted: S.lastCall.accepted }) : null
+  U.showSummary(log.night, summary, outcome)
   U.$('summary').classList.remove('hidden')
+  if (outcome?.met) sound.fanfare()
   S.progress.walked++
   if (summary.sold && !S.progress.firstSale) {
     const g = [...summary.perGood.keys()][0]
@@ -358,9 +398,44 @@ async function onNightChanged(world, nights = 1) {
     scene.celebrate(S.stall.spot * 210)
   }
   if (summary.sold) sound.coin()
+  offerCall()
   tutorial()
   U.setStatus('', 'Ready')
-  setTimeout(() => U.hideSummary(), 9000)
+}
+
+/** Works out tonight's call and puts it under the report (or alone, when there is no report). */
+function offerCall() {
+  if (S.walking || !S.stall) return
+  const log = S.world.last && S.world.last.night === S.world.night - 1 ? S.world.last : null
+  const call = L.nightlyCall({ world: S.world, cfg: S.cfg, stall: S.stall, log, fc: S.fc })
+  S.call = call ? { call, accepted: null, night: S.world.night } : null
+  clearTimeout(S.summaryTimer)
+  if (call) U.showCall(call, { alone: !U.summaryVisible() })
+  else if (U.summaryVisible()) S.summaryTimer = setTimeout(closeSummary, 9000)
+}
+
+function answerCall(yes) {
+  sound.tap()
+  const c = S.call
+  if (!c) return closeSummary()
+  c.accepted = yes
+  if (yes) {
+    if (c.call.accept.skip != null) S.skipGood = { good: c.call.accept.skip, night: c.night }
+    if (c.call.accept.actions.length) {
+      push(...c.call.accept.actions)
+      queue.flush()
+      S.progress.restocked = S.progress.restocked || c.call.accept.actions.some((a) => a.buy)
+      S.progress.priced = S.progress.priced || c.call.accept.actions.some((a) => a.price)
+    }
+    U.toast(`${c.call.accept.label}. The night report will say how it went.`, 'ok')
+  }
+  closeSummary()
+}
+
+function closeSummary() {
+  clearTimeout(S.summaryTimer)
+  U.hideSummary()
+  tutorial()
 }
 
 async function refreshMeNow() {
@@ -402,7 +477,7 @@ function onPrice(g, dir) {
   const cur = S.stall.price[g]
   let next
   if (cur === 0) {
-    next = dir > 0 ? L.suggestPrices(S.world, S.cfg, S.stall)[g].price : 0
+    next = dir > 0 ? L.suggestPrices(S.world, S.cfg, S.stall, S.fc)[g].price : 0
   } else {
     const step = Math.max(1, Math.round(cur * 0.05))
     next = Math.max(0, cur + dir * step)
@@ -417,30 +492,38 @@ function onPrice(g, dir) {
 
 function onSmartPrices() {
   sound.tap()
-  const sugg = L.suggestPrices(S.world, S.cfg, S.stall)
+  const sugg = L.suggestPrices(S.world, S.cfg, S.stall, S.fc)
   const acts = sugg.map((s, g) => ({ price: { stall: S.stall.id, good: g, price: s.price } })).filter((a) => a.price.price !== S.stall.price[a.price.good])
-  if (!acts.length) return U.toast('Your prices already sit just under the rivals.')
+  if (!acts.length) return U.toast('Your prices already sit where they sell best tonight.')
   push(...acts)
   S.progress.priced = true
-  U.toast(`Priced ${acts.length} good${acts.length === 1 ? '' : 's'}: ${sugg[acts[0].price.good].reason}.`, 'good')
+  const first = acts[0].price.good
+  U.toast(`Priced ${acts.length} good${acts.length === 1 ? '' : 's'}. ${S.cfg.goods[first].name} ${sugg[first].price}: ${sugg[first].reason}.`, 'ok', 5000)
   tutorial()
 }
 
 function onRestock() {
   sound.tap()
   if (S.stall.listed != null) return U.toast('A listed stall cannot buy. Withdraw the listing first.', 'warn')
-  const plan = L.suggestRestock(S.world, S.cfg, S.stall)
+  const plan = restockPlan()
   if (!plan.items.length) {
     const full = S.stall.stock.reduce((a, b) => a + b, 0) >= S.stall.capacity
     return U.toast(full ? 'The counter is full.' : S.stall.money < 60 ? 'Not enough coin to buy anything. Sell what you have first.' : 'The Dock has nothing you need right now.', 'warn')
   }
-  push(...L.restockActions(S.stall.id, plan))
+  const acts = L.restockActions(S.stall.id, plan)
   // Price what we just bought, if it has no price yet.
-  const sugg = L.suggestPrices(S.world, S.cfg, S.stall)
-  for (const i of plan.items) if (S.stall.price[i.good] === 0) push({ price: { stall: S.stall.id, good: i.good, price: sugg[i.good].price } })
+  const sugg = L.suggestPrices(S.world, S.cfg, S.stall, S.fc)
+  for (const i of plan.items) if (S.stall.price[i.good] === 0) acts.push({ price: { stall: S.stall.id, good: i.good, price: sugg[i.good].price } })
+  push(...acts)
   S.progress.restocked = true
-  U.toast(`Buying ${plan.items.map((i) => `${i.qty} ${S.cfg.goods[i.good].name}`).join(', ')} for about ${L.fmt(plan.total)}.`, 'good')
+  if (acts.some((a) => a.price)) S.progress.priced = true
+  U.toast(`Buying ${L.listWords(plan.items.map((i) => `${i.qty} ${S.cfg.goods[i.good].name}`))} for about ${L.fmt(plan.total)}.`, 'ok')
   tutorial()
+}
+
+function restockPlan() {
+  const skip = S.skipGood && S.skipGood.night === S.world.night ? S.skipGood.good : null
+  return L.suggestRestock(S.world, S.cfg, S.stall, { skip, fc: S.fc })
 }
 
 function push(...actions) {
@@ -535,15 +618,15 @@ async function openDeed() {
   body.querySelector('[data-upgrade]')?.addEventListener('click', () => {
     push({ upgrade: { stall: S.stall.id, max_cost: S.cfg.tier_cost[S.stall.tier + 1] } })
     U.closeSheet()
-    U.toast('Growing the stall: more goods, more customers.', 'good')
+    U.toast('Growing the stall: more goods, more customers.', 'ok')
   })
   body.querySelectorAll('[data-move]').forEach((b) =>
     b.addEventListener('click', () => {
       const spot = Number(b.dataset.move)
       push({ move: { stall: S.stall.id, spot, max_fee: S.cfg.spots[spot].fee } })
       U.closeSheet()
-      U.toast(`Moving to spot ${spot + 1}. More villagers will pass by.`, 'good')
-      setTimeout(() => scene.focusStall(S.stall.id), 1500)
+      U.toast(`Moving to ${L.spotLabel(spot)}. ${100 - 3 * spot}% of villagers walk this far.`, 'ok')
+      scene.focusStall(S.stall.id)
     }),
   )
   body.querySelector('[data-list]')?.addEventListener('click', () => {
@@ -551,12 +634,12 @@ async function openDeed() {
     if (!(price > 0)) return U.toast('Give an asking price above 0.', 'warn')
     push({ list: { stall: S.stall.id, price } })
     U.closeSheet()
-    U.toast(`Listed for ${L.fmt(price)} coin. Other players see the sign on your stall.`, 'good')
+    U.toast(`Listed for ${L.fmt(price)} coin. Other players see the sign on your stall.`, 'ok')
   })
   body.querySelector('[data-unlist]')?.addEventListener('click', () => {
     push({ unlist: { stall: S.stall.id } })
     U.closeSheet()
-    U.toast('Listing withdrawn.', 'good')
+    U.toast('Listing withdrawn.', 'ok')
   })
   body.querySelector('[data-rename]')?.addEventListener('click', () => {
     const name = L.cleanName(body.querySelector('#rename-input').value)
@@ -584,7 +667,7 @@ async function openBoard() {
   sound.tap()
   U.openSheet('Leaderboard', '<p class="muted">Fetching the ranks…</p>')
   try {
-    const board = await client.leaderboard(60)
+    const board = L.visibleBoard(await client.leaderboard(60), S.stall.id)
     S.board = board
     S.rank = L.rankOf(board, S.stall.id)
     renderHud()
@@ -618,7 +701,7 @@ function onTapStall(id, e) {
     onBuy: () => {
       push({ buy_stall: { with: S.stall.id, target: stall.id, max_price: stall.listed, min_money: 0 } })
       U.hidePeek()
-      U.toast(`Buying ${stall.name} for ${L.fmt(stall.listed)}. Its coin and goods come with it.`, 'good')
+      U.toast(`Buying ${stall.name} for ${L.fmt(stall.listed)}. Its coin and goods come with it.`, 'ok')
     },
   })
 }
@@ -629,8 +712,9 @@ function renderAll() {
   if (!S.started || !S.stall) return
   renderHud()
   renderGoods()
-  const plan = L.suggestRestock(S.world, S.cfg, S.stall)
-  U.$('restock-sub').textContent = plan.items.length ? `about ${L.fmt(plan.total)} coin` : 'counter is full'
+  const plan = restockPlan()
+  const skip = S.skipGood && S.skipGood.night === S.world.night ? S.skipGood.good : null
+  U.$('restock-sub').textContent = plan.items.length ? `${L.listWords(plan.items.map((i) => `${i.qty} ${L.GOOD_SHORT[i.good].toLowerCase()}`))} · ${L.fmt(plan.total)}` : skip != null ? `waiting on cheap ${S.cfg.goods[skip].name}` : 'counter is full'
   U.$('btn-restock').disabled = S.stall.listed != null
 }
 
@@ -640,11 +724,12 @@ function renderHud() {
 }
 
 function renderGoods() {
-  U.renderGoods(S.stall, { cfg: S.cfg, world: S.world, pendingGoods: S.pendingGoods })
+  const reasons = S.fc ? L.suggestPrices(S.world, S.cfg, S.stall, S.fc) : null
+  U.renderGoods(S.stall, { cfg: S.cfg, world: S.world, pendingGoods: S.pendingGoods, fc: S.fc, reasons })
 }
 
 function tutorial() {
-  if (S.walking) return
+  if (S.walking || U.summaryVisible()) return U.hideHint()
   const step = L.tutorialStep(S.progress)
   if (!step) return U.hideHint()
   U.showHint(typeof step.text === 'function' ? step.text(S.progress) : step.text)

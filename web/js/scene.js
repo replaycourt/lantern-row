@@ -119,6 +119,7 @@ export class Scene {
     const ev = world.event
     this.event = typeof ev === 'string' ? { kind: ev, good: null } : ev ? { kind: Object.keys(ev)[0], good: Object.values(ev)[0].good } : { kind: 'quiet', good: null }
     const prev = this.stallById
+    const mySpotBefore = prev.get(this.playerStall)?.spot
     this.stalls = (world.row ?? [])
       .filter((s) => s.spot != null)
       .map((s) => {
@@ -141,12 +142,16 @@ export class Scene {
         }
       })
     this.stallById = new Map(this.stalls.map((s) => [s.id, s]))
+    this.occupied = new Set(this.stalls.map((s) => s.spot))
     if (this.playerStall != null && !this.stallById.has(this.playerStall)) {
       // the player's stall may be off the row: show it floating at the end so it exists on screen
       const mine = (world.row ?? []).find((s) => s.id === this.playerStall)
       if (mine) this.stalls.push({ ...mine, spot: SPOTS + 1, hue: stallHue(mine.id), glow: 0, pop: 0 })
     }
     if (world.listings) for (const [id, price] of world.listings) if (this.stallById.has(id)) this.stallById.get(id).listed = price
+    // the player's stall moved (or came back onto the row): follow it
+    const mySpot = this.stallById.get(this.playerStall)?.spot
+    if (mySpot != null && mySpotBefore != null && mySpot !== mySpotBefore && !this.drag) this.cam.target = mySpot * SPOT_W
   }
 
   setPlayer(id) {
@@ -157,6 +162,11 @@ export class Scene {
     const s = this.stallById.get(view.id)
     if (!s) return
     Object.assign(s, { name: view.name, tier: view.tier, stock: view.stock, price: view.price, money: view.money, listed: view.listed, rep: view.rep })
+    if (view.spot != null && view.spot !== s.spot) {
+      s.spot = view.spot
+      this.occupied = new Set(this.stalls.map((x) => x.spot))
+      if (view.id === this.playerStall) this.cam.target = view.spot * SPOT_W
+    }
     s.pop = 1
   }
 
@@ -249,8 +259,9 @@ export class Scene {
       let t = start
       let totalDist = 0
       let px = startX
+      const slot = ((sc.villager % 4) - 1.5) * 34
       for (const st of stops) {
-        const tx = this.stallById.get(st.stall).spot * SPOT_W + (rand() - 0.5) * 50
+        const tx = this.stallById.get(st.stall).spot * SPOT_W + slot + (rand() - 0.5) * 12
         totalDist += Math.abs(tx - px)
         px = tx
       }
@@ -260,7 +271,7 @@ export class Scene {
       const speed = Math.max(220, totalDist / Math.max(0.8, budget - dwellTotal))
       px = startX
       for (const st of stops) {
-        const tx = this.stallById.get(st.stall).spot * SPOT_W + (rand() - 0.5) * 50
+        const tx = this.stallById.get(st.stall).spot * SPOT_W + slot + (rand() - 0.5) * 12
         const d = Math.abs(tx - px) / speed
         actor.steps.push({ kind: 'walk', from: px, to: tx, t0: t, t1: t + d })
         t += d
@@ -334,7 +345,7 @@ export class Scene {
       return
     }
     const half = this.W / 2 / this.cam.scale + 120
-    while (this.strollers.length < (this.title ? 4 : 2)) {
+    while (this.strollers.length < (this.title ? 4 : 3)) {
       const id = Math.floor(Math.random() * 12)
       const info = this.villagersInfo[id] ?? { name: '', trade: '' }
       const dir = Math.random() < 0.7 ? 1 : -1
@@ -489,14 +500,16 @@ export class Scene {
     this.drawHouses(0.45, this.horizonY + 26 * k, 1, '#120f2e', '#1d1946')
     this.drawGround()
     this.drawLampPosts()
+    this.drawStringLights()
     if (this.event.kind === 'festival') this.drawBunting()
     this.drawGate()
     this.drawDock()
+    this.drawDecor()
     for (const s of this.stalls) this.drawStall(s)
     for (const a of this.strollers) this.drawVillager(a)
     for (const a of this.actors) if (a.visible) this.drawVillager(a)
     this.drawCoins()
-    for (const a of this.actors) if (a.visible && a.bubble && (!this.walk || this.walk.t < a.bubble.until)) this.drawBubble(a)
+    this.drawBubbles(this.actors.filter((a) => a.visible && a.bubble && (!this.walk || this.walk.t < a.bubble.until)))
     this.drawFloats()
     this.drawSparks()
     if (this.event.kind === 'storm') this.drawRain()
@@ -697,6 +710,35 @@ export class Scene {
       ctx.lineTo(lx - 3.5 * k, ly + 7 * k)
       ctx.closePath()
       ctx.fill()
+    }
+  }
+
+  /** A string of little lanterns between the lamp posts, so the row reads as one street. */
+  drawStringLights() {
+    const { ctx } = this
+    const k = this.cam.scale
+    const storm = this.event.kind === 'storm'
+    for (let s = 0; s < SPOTS; s++) {
+      const x0 = this.sx(s * SPOT_W - SPOT_W / 2)
+      const x1 = this.sx((s + 1) * SPOT_W - SPOT_W / 2)
+      if (x1 < -40 || x0 > this.W + 40) continue
+      const y = this.sy(-200) + 10 * k
+      ctx.strokeStyle = 'rgba(255,230,200,0.22)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(x0, y)
+      ctx.quadraticCurveTo((x0 + x1) / 2, y + 22 * k, x1, y)
+      ctx.stroke()
+      for (let i = 1; i <= 4; i++) {
+        const p = i / 5
+        const lx = lerp(x0, x1, p)
+        const ly = y + 22 * k * 4 * p * (1 - p) * 0.5 + 4 * k
+        const sway = storm && !this.reduced ? Math.sin(this.t * 3 + i + s) * 2 * k : 0
+        const hue = [20, 40, 350, 30][(i + s) % 4]
+        ctx.fillStyle = `hsla(${hue},90%,65%,${storm ? 0.55 : 0.9})`
+        ctx.fillRect(lx - 2.5 * k + sway, ly, 5 * k, 7 * k)
+        if (!storm) this.lanternGlow(lx + sway, ly + 3 * k, 18 * k, 0.35)
+      }
     }
   }
 
@@ -1179,32 +1221,168 @@ export class Scene {
     ctx.restore()
   }
 
-  drawBubble(a) {
+  /** Speech bubbles, laid out left to right so that none covers another: a crowded stall stacks them. */
+  drawBubbles(actors) {
     const { ctx } = this
     const k = this.cam.scale
     const fs = Math.max(11, 12.5 * k)
     ctx.font = `bold ${fs}px ${FONT}`
-    const text = a.bubble.text
-    const tw = ctx.measureText(text).width
-    const pw = tw + 16
     const ph = fs + 12
-    let x = this.sx(a.x)
-    const y = this.sy(a.y) - 56 * k
-    x = clamp(x, pw / 2 + 6, this.W - pw / 2 - 6)
-    const tailX = clamp(this.sx(a.x), x - pw / 2 + 10, x + pw / 2 - 10)
-    const fill = a.bubble.kind === 'buy' ? '#fff7e6' : a.bubble.kind === 'refuse' ? '#ffe3e3' : '#e9e6f5'
-    ctx.fillStyle = fill
-    roundRect(ctx, x - pw / 2, y - ph, pw, ph, 8)
-    ctx.fill()
-    ctx.beginPath()
-    ctx.moveTo(tailX - 5, y - 1)
-    ctx.lineTo(tailX, y + 7)
-    ctx.lineTo(tailX + 5, y - 1)
-    ctx.closePath()
-    ctx.fill()
-    ctx.fillStyle = '#2a1d2e'
-    ctx.textAlign = 'center'
-    ctx.fillText(text, x, y - ph / 2 + fs * 0.36)
+    const placed = []
+    const items = actors
+      .map((a) => {
+        const pw = ctx.measureText(a.bubble.text).width + 16
+        const ax = this.sx(a.x)
+        return { a, pw, ax, x: clamp(ax, pw / 2 + 6, this.W - pw / 2 - 6), y: this.sy(a.y) - 56 * k }
+      })
+      .filter((b) => b.ax > -80 && b.ax < this.W + 80)
+      .sort((p, q) => p.ax - q.ax)
+    for (const b of items) {
+      // lift the bubble while it overlaps one already placed
+      let guard = 0
+      while (guard++ < 8 && placed.some((o) => Math.abs(o.x - b.x) < (o.pw + b.pw) / 2 + 4 && Math.abs(o.y - b.y) < ph + 3)) b.y -= ph + 4
+      placed.push(b)
+      const tailX = clamp(b.ax, b.x - b.pw / 2 + 10, b.x + b.pw / 2 - 10)
+      const base = this.sy(b.a.y) - 56 * k
+      const fill = b.a.bubble.kind === 'buy' ? '#fff7e6' : b.a.bubble.kind === 'refuse' ? '#ffe3e3' : '#e9e6f5'
+      ctx.fillStyle = fill
+      if (b.y < base - 2) {
+        // a thin stem down to the speaker
+        ctx.strokeStyle = 'rgba(255,247,230,0.55)'
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        ctx.moveTo(tailX, b.y)
+        ctx.lineTo(tailX, base + 4)
+        ctx.stroke()
+      }
+      roundRect(ctx, b.x - b.pw / 2, b.y - ph, b.pw, ph, 8)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.moveTo(tailX - 5, b.y - 1)
+      ctx.lineTo(tailX, b.y + 7)
+      ctx.lineTo(tailX + 5, b.y - 1)
+      ctx.closePath()
+      ctx.fill()
+      ctx.fillStyle = '#2a1d2e'
+      ctx.textAlign = 'center'
+      ctx.fillText(b.a.bubble.text, b.x, b.y - ph / 2 + fs * 0.36)
+    }
+  }
+
+  /** Empty spots are not empty: a tree, a bench, a shrine, a closed cart or a well sit there. */
+  drawDecor() {
+    const { ctx } = this
+    const k = this.cam.scale
+    const occupied = this.occupied ?? new Set()
+    for (let spot = 0; spot < SPOTS; spot++) {
+      if (occupied.has(spot)) continue
+      const x = this.sx(spot * SPOT_W)
+      if (x < -140 * k || x > this.W + 140 * k) continue
+      const ground = this.sy(0)
+      const kind = spot % 5
+      if (kind === 0) {
+        // a tree with two lanterns in it
+        ctx.fillStyle = '#3a2a1f'
+        ctx.fillRect(x - 5 * k, ground - 90 * k, 10 * k, 90 * k)
+        ctx.fillStyle = '#1f3b32'
+        for (const [dx, dy, r] of [[-26, -118, 34], [24, -112, 30], [0, -150, 36], [-8, -96, 28]]) {
+          ctx.beginPath()
+          ctx.arc(x + dx * k, ground + dy * k, r * k, 0, Math.PI * 2)
+          ctx.fill()
+        }
+        ctx.fillStyle = '#26493c'
+        ctx.beginPath()
+        ctx.arc(x - 12 * k, ground - 140 * k, 26 * k, 0, Math.PI * 2)
+        ctx.fill()
+        this.paperLantern(x - 30 * k, ground - 100 * k, 7 * k, '#ff8c5a', 0.8, this.reduced ? 0 : Math.sin(this.t * 1.3 + spot) * 0.05)
+        this.paperLantern(x + 28 * k, ground - 92 * k, 7 * k, '#ffb347', 0.8, this.reduced ? 0 : Math.sin(this.t * 1.1 + spot) * 0.05)
+      } else if (kind === 1) {
+        // a bench between two planters
+        ctx.fillStyle = '#5a3f2a'
+        ctx.fillRect(x - 34 * k, ground - 26 * k, 68 * k, 6 * k)
+        ctx.fillRect(x - 30 * k, ground - 20 * k, 5 * k, 20 * k)
+        ctx.fillRect(x + 25 * k, ground - 20 * k, 5 * k, 20 * k)
+        ctx.fillRect(x - 34 * k, ground - 40 * k, 68 * k, 5 * k)
+        for (const dx of [-62, 62]) {
+          ctx.fillStyle = '#7a4a3a'
+          ctx.fillRect(x + dx * k - 14 * k, ground - 22 * k, 28 * k, 22 * k)
+          ctx.fillStyle = '#2f5a3a'
+          ctx.beginPath()
+          ctx.arc(x + dx * k, ground - 30 * k, 17 * k, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = '#e8503a'
+          for (let i = 0; i < 3; i++) {
+            ctx.beginPath()
+            ctx.arc(x + dx * k + (i - 1) * 9 * k, ground - 34 * k - (i % 2) * 6 * k, 2.6 * k, 0, Math.PI * 2)
+            ctx.fill()
+          }
+        }
+      } else if (kind === 2) {
+        // a small shrine with a bell and two red lanterns
+        ctx.fillStyle = '#4a2a2e'
+        ctx.fillRect(x - 28 * k, ground - 70 * k, 56 * k, 70 * k)
+        ctx.fillStyle = '#7a2a2e'
+        ctx.beginPath()
+        ctx.moveTo(x - 44 * k, ground - 68 * k)
+        ctx.quadraticCurveTo(x, ground - 112 * k, x + 44 * k, ground - 68 * k)
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = '#1b1426'
+        ctx.fillRect(x - 12 * k, ground - 52 * k, 24 * k, 34 * k)
+        ctx.fillStyle = '#d6a447'
+        ctx.beginPath()
+        ctx.arc(x, ground - 60 * k, 5 * k, 0, Math.PI * 2)
+        ctx.fill()
+        this.paperLantern(x - 36 * k, ground - 60 * k, 8 * k, '#e8503a', 0.9, this.reduced ? 0 : Math.sin(this.t * 1.2 + spot) * 0.04)
+        this.paperLantern(x + 36 * k, ground - 60 * k, 8 * k, '#e8503a', 0.9, this.reduced ? 0 : Math.sin(this.t * 1.2 + spot + 1) * 0.04)
+      } else if (kind === 3) {
+        // a cart under a cloth, with crates: a stall that is not open tonight
+        ctx.fillStyle = '#4a3220'
+        ctx.fillRect(x - 46 * k, ground - 44 * k, 92 * k, 30 * k)
+        ctx.fillStyle = '#2b2140'
+        ctx.beginPath()
+        ctx.moveTo(x - 50 * k, ground - 44 * k)
+        ctx.quadraticCurveTo(x - 20 * k, ground - 70 * k, x + 10 * k, ground - 60 * k)
+        ctx.quadraticCurveTo(x + 35 * k, ground - 72 * k, x + 50 * k, ground - 44 * k)
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = '#2a1d1a'
+        for (const dx of [-30, 30]) {
+          ctx.beginPath()
+          ctx.arc(x + dx * k, ground - 8 * k, 9 * k, 0, Math.PI * 2)
+          ctx.fill()
+        }
+        ctx.fillStyle = '#7a5a33'
+        ctx.fillRect(x + 56 * k, ground - 20 * k, 20 * k, 20 * k)
+        ctx.fillRect(x - 76 * k, ground - 18 * k, 18 * k, 18 * k)
+        ctx.strokeStyle = '#4a3620'
+        ctx.lineWidth = Math.max(1, 1.2 * k)
+        ctx.strokeRect(x + 56 * k, ground - 20 * k, 20 * k, 20 * k)
+        ctx.strokeRect(x - 76 * k, ground - 18 * k, 18 * k, 18 * k)
+      } else {
+        // a well with a little roof and a noticeboard
+        ctx.fillStyle = '#4b4452'
+        ctx.fillRect(x - 24 * k, ground - 30 * k, 48 * k, 30 * k)
+        ctx.fillStyle = '#5c5468'
+        ctx.fillRect(x - 26 * k, ground - 34 * k, 52 * k, 6 * k)
+        ctx.fillStyle = '#3a2a1f'
+        ctx.fillRect(x - 20 * k, ground - 80 * k, 4 * k, 50 * k)
+        ctx.fillRect(x + 16 * k, ground - 80 * k, 4 * k, 50 * k)
+        ctx.fillStyle = '#6b2a2e'
+        ctx.beginPath()
+        ctx.moveTo(x - 32 * k, ground - 78 * k)
+        ctx.lineTo(x, ground - 98 * k)
+        ctx.lineTo(x + 32 * k, ground - 78 * k)
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = '#5a3f2a'
+        ctx.fillRect(x + 48 * k, ground - 70 * k, 5 * k, 70 * k)
+        ctx.fillStyle = '#d9c9a5'
+        ctx.fillRect(x + 36 * k, ground - 74 * k, 30 * k, 26 * k)
+        ctx.fillStyle = 'rgba(60,40,30,0.5)'
+        for (let i = 0; i < 3; i++) ctx.fillRect(x + 40 * k, ground - 68 * k + i * 6 * k, (18 - i * 4) * k, 2 * k)
+      }
+    }
   }
 
   drawCoins() {
@@ -1378,5 +1556,5 @@ export function drawLogo(canvas, { width = 520 } = {}) {
   ctx.fillStyle = '#f6dcb0'
   ctx.font = `600 ${fs * 0.21}px ${FONT}`
   ctx.textAlign = 'center'
-  ctx.fillText('a night market that never closes', width / 2, y + fs * 0.42)
+  ctx.fillText('run a stall · price your goods · out-trade the merchants', width / 2, y + fs * 0.42)
 }

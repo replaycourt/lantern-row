@@ -26,8 +26,12 @@ const dock = [
 
 const kettle = { id: 1, name: 'The Quiet Kettle', npc: true, spot: 1, footfall: 97, stock: [9, 2, 0, 0, 1], price: [99, 127, 0, 0, 258], rep: 511, tier: 1, money: 17489 }
 const uncle = { id: 6, name: "Uncle's Everything", npc: true, spot: 20, footfall: 40, stock: [0, 2, 5, 1, 0], price: [104, 116, 57, 387, 273], rep: 463, tier: 1, money: 16815 }
-const me = { id: 14, name: 'My Stall', npc: false, spot: 14, footfall: 58, money: 3000, stock: [0, 0, 0, 0, 0], price: [0, 0, 0, 0, 0], rep: 200, tier: 0, capacity: 40, rent_paid: 0, customers: 0, earned: 0, listed: null }
-const world = { night: 41, event: { festival: { good: 0 } }, event_left: 1, event_next: { bumper: { good: 2 } }, dock, row: [kettle, uncle, me], villagers: [] }
+const me = { id: 14, name: 'My Stall', npc: false, spot: 14, footfall: 58, money: 3000, stock: [0, 0, 0, 0, 0], price: [0, 0, 0, 0, 0], rep: 200, tier: 0, capacity: 40, service: 10, rent_paid: 0, customers: 0, earned: 0, listed: null, sold_last: [0, 0, 0, 0, 0] }
+// Two villagers as the live world shows them: Ansel wants charms, tea and dumplings tonight (checked against testnet), Ines only oil and dumplings.
+const ansel = { id: 0, name: 'Ansel', trade: 'dock hand', wallet: 2290, wage: 200, taste: [100, 70, 120, 0, 40], unmet: [1, 1, 0, 30, 13], wants: [4, 0, 2], memory: [[2, 8], [14, 3]] }
+const ines = { id: 8, name: 'Ines', trade: 'card player', wallet: 2247, wage: 220, taste: [60, 40, 90, 40, 170], unmet: [0, 11, 0, 17, 0], wants: [1, 2], memory: [[2, 8]] }
+const world = { night: 41, event: { festival: { good: 0 } }, event_left: 1, event_next: { bumper: { good: 2 } }, dock, row: [kettle, uncle, me], villagers: [ansel, ines] }
+const quiet = { ...world, event: 'quiet', event_left: 2, event_next: 'quiet' }
 
 test('dock cost matches the contract formula', () => {
   // one unit at heat 0: ceil(base * (s + 0 + 0) / s) = base
@@ -48,32 +52,67 @@ test('affordable never exceeds money or max', () => {
   assert.equal(L.affordable(cfg.goods[0], dock[0], 0, 4), 0)
 })
 
-test('suggested prices undercut the cheapest rival with stock and respect floors', () => {
-  const s = L.suggestPrices(world, cfg, me)
-  // tea: cheapest rival 99 -> 96, capped at 140% of fair = 84, festival on tea -> +25% = 105
-  assert.equal(s[0].price, 105)
-  assert.match(s[0].reason, /festival/)
-  // a new stall (rep 200) undercuts by 12%: lamp oil rivals 127 and 116 -> 116*0.88 = 102, floor max(65, 85) = 85
-  assert.equal(s[1].price, 102)
-  assert.match(s[1].reason, /until villagers know you/)
-  // dumplings: Uncle sells at 57 -> 50; floor max(28, 38) = 38; ceiling 56
-  assert.equal(s[2].price, 50)
-  // silk: rival 387 -> 340, floor max(222, 332) = 332, ceiling 490
-  assert.equal(s[3].price, 340)
-  // charms: rivals 258, 273 -> 227, ceiling 252
-  assert.equal(s[4].price, 227)
-  for (let g = 0; g < 5; g++) assert.ok(s[g].price <= cfg.goods[g].max_price)
-  // an established stall (rep 600) only shaves 3% off
-  const est = L.suggestPrices(world, cfg, { ...me, rep: 600 })
-  assert.equal(est[1].price, 112)
-  assert.equal(est[4].price, 250)
+test('villager minds match the contract: wealth, wants, willingness', () => {
+  // Ansel: wealth min(150, 60 + floor(2290*40/1000)) = 150, two spare nights
+  assert.equal(L.wealthPct(2290, 200), 150)
+  assert.equal(L.spareNights(150), 2)
+  assert.equal(L.needPeriod(cfg.goods[1], 70), 4)
+  assert.equal(L.needPeriod(cfg.goods[2], 120), 1)
+  // tea 1+2 >= 2 (over 1), oil 3 < 4, dumplings 2 >= 1 (over 1), silk no taste, charms 15 >= 12 (over 3)
+  assert.deepEqual(L.villagerWants(ansel, cfg, 'quiet').map((w) => w.good), [4, 0, 2])
+  assert.deepEqual(L.villagerWants(ansel, cfg, 'quiet').map((w) => w.over), [3, 1, 1])
+  // a festival on oil makes him want it too: max(3, 4) + 1 - 4 = 1 overdue
+  assert.ok(L.villagerWants(ansel, cfg, { festival: { good: 1 } }).some((w) => w.good === 1 && w.over === 1))
+  // tea: 60 * 100 * 115 * 150 * 100 / 1e8 = 103; at a rep-200 stall with memory 3: floor(103 * 105 / 100) = 108
+  assert.equal(L.willingness(cfg.goods[0], 100, 1, 150, 'quiet', 0), 103)
+  assert.equal(L.stallWtp(103, 200, 3), 108)
+  assert.equal(L.willingness(cfg.goods[0], 100, 1, 150, 'payday', 0), 113)
+  assert.equal(L.willingness(cfg.goods[0], 100, 1, 150, { festival: { good: 0 } }, 0), 134)
 })
 
-test('suggested prices without rivals fall back to a fair price', () => {
-  const lonely = { ...world, row: [me], event: 'quiet' }
+test('forecast counts who wants what and what each would pay here', () => {
+  const fc = L.forecast(quiet, cfg, me)
+  assert.equal(fc[0].wanted, 1) // only Ansel wants tea
+  assert.equal(fc[2].wanted, 2) // both want dumplings
+  assert.equal(fc[1].wanted, 1) // Ines wants oil, 11 nights overdue
+  assert.equal(fc[3].wanted, 0)
+  assert.equal(fc[0].rivalStock, 9)
+  assert.equal(fc[0].rivalMin, 99)
+  const tea = fc[0].buyers[0]
+  assert.equal(tea.name, 'Ansel')
+  assert.equal(tea.eff, 108)
+  assert.equal(tea.reach, (58 + 25) / 100) // he remembers this stall
+  // Kettle asks 99 for tea; Ansel would pay floor(103 * 105/100) = 108 there (rep 511 -> +5, no memory): surplus 9
+  assert.equal(tea.rivals.length, 1)
+  assert.equal(tea.rivals[0].surplus, 9)
+  // at 95 our surplus is 13 > 9: only the walk-by chance is left; at 105 the Kettle wins when he passes it
+  assert.ok(Math.abs(L.expectSales(fc, 0, 95) - 0.83) < 1e-9)
+  assert.ok(Math.abs(L.expectSales(fc, 0, 105) - 0.83 * (1 - 0.97)) < 1e-9)
+  assert.equal(L.expectSales(fc, 0, 200), 0)
+  assert.equal(L.expectSales(fc, 0, 95, { stock: 0 }), 0)
+})
+
+test('suggested prices follow the villagers and stay within the band', () => {
+  const s = L.suggestPrices(quiet, cfg, me)
+  // tea: floor max(45, 57) = 57, ceiling 84; Ansel pays up to 108, Kettle's surplus 9: 84 earns the most
+  assert.equal(s[0].price, 84)
+  assert.match(s[0].reason, /would buy|would pay it/)
+  // silk: nobody wants it tonight: just under Uncle's 387, capped at 140% of fair = 490 -> 386
+  assert.equal(s[3].price, 386)
+  assert.match(s[3].reason, /nobody wants it/)
+  for (let g = 0; g < 5; g++) assert.ok(s[g].price <= cfg.goods[g].max_price && s[g].price > 0)
+  // a festival on tea: Ines wants it too but can pay only 76, and two units each beat Ansel alone at 105
+  assert.equal(L.suggestPrices(world, cfg, me)[0].price, 76)
+  assert.match(L.suggestPrices(world, cfg, me)[0].reason, /festival: ~3 would pay it/)
+  // with Ansel alone the ceiling rises to 175% of fair, and the Kettle's surplus (41) beats ours at 105, so 76 it stays
+  assert.equal(L.suggestPrices({ ...world, villagers: [ansel] }, cfg, { ...me, rep: 900 })[0].price, 105)
+})
+
+test('suggested prices without rivals or villagers fall back to a fair price', () => {
+  const lonely = { ...quiet, row: [me], villagers: [] }
   const s = L.suggestPrices(lonely, cfg, me)
-  assert.equal(s[0].price, 84) // 140% of 60
-  assert.match(s[0].reason, /nobody else/)
+  assert.equal(s[0].price, 96) // 160% of 60: nobody else sells it
+  assert.match(s[0].reason, /nobody wants it/)
 })
 
 test('restock plan fits money, capacity and Dock supply', () => {
@@ -118,6 +157,9 @@ test('project applies actions optimistically', () => {
   assert.equal(s.capacity, 80)
   assert.equal(s.money, 3000 - L.dockCost(cfg.goods[0], dock[0], 2) - 5000)
   assert.equal(me.stock[0], 0, 'the original is untouched')
+  const moved = L.project(me, [{ move: { stall: 14, spot: 3, max_fee: 100 } }], world, cfg)
+  assert.equal(moved.spot, 3)
+  assert.equal(moved.footfall, 91)
 })
 
 test('signing text has the exact contract shape', () => {
@@ -159,12 +201,13 @@ test('summary explains sales, refusals and rent', () => {
   assert.equal(s.mood, 'good')
   assert.match(s.headline, /6 sales/)
   const text = s.lines.map((l) => l.text).join('\n')
-  assert.match(text, /Sold 2 tea for 190, 4 dumplings for 200/)
+  assert.match(text, /Sold 2 tea for 190 and 4 dumplings for 200/)
   assert.match(text, /Sold out of dumplings/)
-  assert.match(text, /V8 found your tea too dear at 95/)
-  assert.match(text, /Rent 21 for spot 15\./)
+  assert.match(text, /V8 found your tea too dear at 95\. Nobody on the row was cheap enough for V8\./)
+  assert.match(text, /Sold out of dumplings after 4\. Stock more next time\./)
+  assert.match(text, /Rent 21 for spot 14\./)
   const caught = L.summariseNight({ log, stall: { ...after, rent_paid: 730 }, before, world: { ...world, villagers }, cfg, villagers, nights: 30 })
-  assert.match(caught.lines.map((l) => l.text).join('\n'), /Rent 630 for spot 15, over the 30 nights/)
+  assert.match(caught.lines.map((l) => l.text).join('\n'), /Rent 630 for spot 14, over the 30 nights/)
 })
 
 test('summary explains a night with no sales, for each reason', () => {
@@ -190,7 +233,7 @@ test('summary explains a night with no sales, for each reason', () => {
   assert.match(L.summariseNight({ ...base, stall: unwanted, before: unwanted }).lines[0].text, /Nobody wanted silk/)
 
   const back = { ...me, spot: 20, footfall: 40, stock: [3, 0, 0, 0, 0], price: [90, 0, 0, 0, 0] }
-  assert.match(L.summariseNight({ ...base, stall: back, before: back }).lines[0].text, /40% of villagers walk as far as spot 21/)
+  assert.match(L.summariseNight({ ...base, stall: back, before: back }).lines[0].text, /40% of villagers walk as far as spot 20/)
 })
 
 test('event info and forecast read well', () => {
@@ -199,7 +242,10 @@ test('event info and forecast read well', () => {
   assert.equal(L.eventInfo({ festival: { good: 3 } }, cfg).title, 'Festival of silk')
   assert.equal(L.eventInfo({ storm: { good: 1 } }, cfg).good, 1)
   assert.equal(L.forecastLine(world, cfg), 'Bumper dumplings next night.')
-  assert.equal(L.forecastLine({ ...world, event_left: 3, event_next: 'quiet' }, cfg), 'Quiet nights ahead (in 3 nights).')
+  assert.deepEqual(L.bannerText(world, cfg), { title: 'Festival of tea', detail: 'ends tonight · then Bumper dumplings', kind: 'festival', good: 0, next: L.eventInfo(world.event_next, cfg) })
+  assert.equal(L.bannerText({ ...quiet, event_next: { storm: { good: 1 } } }, cfg).detail, 'then Storm on lamp oil')
+  assert.equal(L.eventInfo({ storm: { good: 1 } }, cfg).title, 'Storm: little lamp oil')
+  assert.equal(L.forecastLine({ ...world, event_left: 3, event_next: 'quiet' }, cfg), 'Quiet nights in 3 nights.')
 })
 
 test('catch-up text only when several nights passed', () => {
@@ -251,4 +297,89 @@ test('misc helpers', () => {
   assert.equal(L.rankOf([], 3), null)
   assert.notEqual(L.stallHue(1), L.stallHue(2))
   assert.equal(L.cheapestRival(world, 14, 1).id, 6)
+  assert.equal(L.listWords(['tea', 'oil', 'silk']), 'tea, oil and silk')
+  assert.equal(L.listWords(['tea']), 'tea')
+  assert.equal(L.spotLabel(0), 'spot 0')
+  assert.equal(L.spotLabel(null), 'off the row')
+  const board = [{ id: 1, rank: 1, spot: 1 }, { id: 9, rank: 2, spot: null }, { id: 14, rank: 3, spot: null }, { id: 6, rank: 4, spot: 20 }]
+  assert.deepEqual(L.visibleBoard(board, 14).map((r) => [r.id, r.rank]), [[1, 1], [14, 2], [6, 3]])
+})
+
+test('tonight\'s call: one decision a night, from the rules', () => {
+  // the festival on tea is tonight: price for it and fill up
+  const fest = L.nightlyCall({ world: { ...world, event_left: 2, event_next: 'quiet' }, cfg, stall: { ...me, stock: [2, 0, 0, 0, 0], price: [60, 0, 0, 0, 0] } })
+  assert.equal(fest.kind, 'festival-price')
+  assert.equal(fest.good, 0)
+  assert.ok(fest.accept.actions.some((a) => a.buy?.good === 0))
+  assert.ok(fest.accept.actions.some((a) => a.price?.good === 0 && a.price.price === 76))
+  assert.match(fest.accept.label, /Stock 2 and price at 76/)
+  assert.match(fest.expect, /About 3 sales at 76/)
+
+  // a festival of silk starts next night: stock silk now
+  const before = L.nightlyCall({ world: { ...quiet, event_left: 1, event_next: { festival: { good: 3 } } }, cfg, stall: me })
+  assert.equal(before.kind, 'festival-stock')
+  assert.equal(before.good, 3)
+  assert.equal(before.accept.actions[0].buy.good, 3)
+  assert.equal(before.accept.actions[0].buy.qty, 3) // the Dock only has 3
+  assert.ok(before.accept.cost >= L.dockCost(cfg.goods[3], dock[3], 3))
+  assert.match(before.expect, /Could sell for about 525 each/)
+
+  // a storm on oil next night
+  const storm = L.nightlyCall({ world: { ...quiet, event_left: 1, event_next: { storm: { good: 1 } } }, cfg, stall: me })
+  assert.equal(storm.kind, 'storm-stock')
+  assert.equal(storm.accept.actions[0].buy.qty, 7)
+
+  // bumper dumplings next night: wait
+  const wait = L.nightlyCall({ world: { ...quiet, event_left: 1, event_next: { bumper: { good: 2 } } }, cfg, stall: me })
+  assert.equal(wait.kind, 'bumper-wait')
+  assert.equal(wait.accept.skip, 2)
+  assert.equal(wait.priceThen, 23)
+
+  // payday: raise prices
+  const pay = L.nightlyCall({ world: { ...quiet, event: 'payday' }, cfg, stall: { ...me, stock: [5, 0, 5, 0, 0], price: [80, 0, 50, 0, 0] } })
+  assert.equal(pay.kind, 'payday-price')
+  assert.deepEqual(pay.accept.actions.map((a) => a.price.price), [86, 54])
+
+  // sold out last night with buyers left over
+  const log = { night: 40, sales: [[1, 14, 2, 50], [2, 14, 2, 50], [3, 2, 2, 60], [4, 1, 0, 99]], refusals: [], missed: [[5, 2]] }
+  const soldOut = L.nightlyCall({ world: quiet, cfg, stall: { ...me, stock: [0, 0, 0, 0, 0], price: [0, 0, 50, 0, 0], sold_last: [0, 0, 2, 0, 0] }, log })
+  assert.equal(soldOut.kind, 'sold-out')
+  assert.equal(soldOut.good, 2)
+  assert.match(soldOut.text, /2 sold last night and 2 more/)
+
+  // two refusals on tea while the Kettle is cheaper: cut
+  const refusedLog = { night: 40, sales: [], refusals: [[1, 14, 0], [2, 14, 0]], missed: [] }
+  const cut = L.nightlyCall({ world: quiet, cfg, stall: { ...me, stock: [5, 0, 0, 0, 0], price: [150, 0, 0, 0, 0] }, log: refusedLog })
+  assert.equal(cut.kind, 'price-cut')
+  assert.equal(cut.accept.actions[0].price.price, 84)
+  assert.match(cut.decline.label, /Hold at 150/)
+
+  // a quiet night with nothing short: undercut on the most wanted good (dumplings, 2 want it)
+  const plain = L.nightlyCall({ world: quiet, cfg, stall: { ...me, stock: [0, 0, 1, 0, 0], price: [0, 0, 57, 0, 0] } })
+  assert.ok(plain, 'there is always something to say on a quiet night with demand')
+  assert.ok(['gap', 'undercut'].includes(plain.kind))
+
+  // no call off the row, while listed, or with no demand at all
+  assert.equal(L.nightlyCall({ world: quiet, cfg, stall: { ...me, spot: null } }), null)
+  assert.equal(L.nightlyCall({ world: quiet, cfg, stall: { ...me, listed: 500 } }), null)
+  assert.equal(L.nightlyCall({ world: { ...quiet, villagers: [] }, cfg, stall: me }), null)
+})
+
+test('the call is judged by what the night log says', () => {
+  const call = { kind: 'gap', good: 2, accept: { cost: 120, actions: [{ buy: { stall: 14, good: 2, qty: 6, max_cost: 200 } }] } }
+  const won = { night: 41, sales: [[1, 14, 2, 50], [2, 14, 2, 50], [3, 14, 2, 50], [4, 2, 2, 60]], refusals: [], missed: [] }
+  const j = L.judgeCall(call, { log: won, stall: me, cfg, accepted: true })
+  assert.equal(j.met, true)
+  assert.match(j.text, /paid off: 3 dumplings sold for 150 \(stock cost 120\)/)
+  const lost = { night: 41, sales: [[4, 2, 2, 60]], refusals: [[5, 14, 2]], missed: [] }
+  const k = L.judgeCall(call, { log: lost, stall: me, cfg, accepted: true })
+  assert.equal(k.met, false)
+  assert.match(k.text, /none of the dumplings sold tonight, 1 found it too dear/)
+  const skipped = L.judgeCall(call, { log: lost, stall: me, cfg, accepted: false })
+  assert.equal(skipped.met, null)
+  assert.match(skipped.text, /You skipped dumplings: 1 bought it from the merchants/)
+  const wait = L.judgeCall({ kind: 'bumper-wait', good: 2, priceThen: 23 }, { log: lost, stall: me, cfg, accepted: true, world: { dock: [{}, {}, { price: 16 }] } })
+  assert.equal(wait.met, true)
+  assert.match(wait.text, /fell from 23 to 16/)
+  assert.equal(L.judgeCall(null, { log: lost }), null)
 })

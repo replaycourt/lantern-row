@@ -5,18 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://test.rpc.fastnear.com https://near-testnet.drpc.org; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
 <title>Lantern Row</title>
-<meta name="description" content="Run a stall on a lantern-lit night market that never closes. Twelve villagers with their own wallets walk the row every 20 seconds. No sign-up, no wallet, two minutes to learn.">
+<meta name="description" content="Run a stall on a lantern-lit night market: stock it, price your goods, out-trade the merchants. Twelve villagers with their own wallets walk the row every 20 seconds. No sign-up, no wallet, two minutes to learn.">
 <meta name="theme-color" content="#0f0d2b">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Lantern Row">
-<meta property="og:description" content="A night market that never closes. Run a stall, price your tea, out-trade The Quiet Kettle. No sign-up, no wallet.">
+<meta property="og:description" content="Run a stall, price your goods, out-trade the merchants. A night market that never closes. No sign-up, no wallet.">
 <meta property="og:image" content="https://replaycourt.github.io/lantern-row/web/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:url" content="https://replaycourt.github.io/lantern-row/web/">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Lantern Row">
-<meta name="twitter:description" content="A night market that never closes. Run a stall, price your tea, out-trade The Quiet Kettle. No sign-up, no wallet.">
+<meta name="twitter:description" content="Run a stall, price your goods, out-trade the merchants. A night market that never closes. No sign-up, no wallet.">
 <meta name="twitter:image" content="https://replaycourt.github.io/lantern-row/web/og.png">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="css/style.css">
@@ -65,15 +65,29 @@
 <div id="hint" class="hint hidden"><span id="hint-text"></span></div>
 
 <aside id="summary" class="summary hidden" aria-live="polite">
-  <div class="summary-head"><span class="summary-night" id="summary-night"></span><b id="summary-headline"></b><button class="close" id="summary-close" type="button" aria-label="Close">×</button></div>
-  <ul id="summary-lines"></ul>
+  <button class="close" id="summary-close" type="button" aria-label="Close">×</button>
+  <div id="summary-report">
+    <div class="summary-head"><span class="summary-night" id="summary-night"></span><b id="summary-headline"></b></div>
+    <ul id="summary-lines"></ul>
+    <p id="summary-outcome" class="summary-outcome hidden"></p>
+    <div id="summary-stamp" class="stamp-seal stamp-call hidden">CALLED<br>IT</div>
+  </div>
+  <div id="summary-call" class="summary-call hidden">
+    <div class="call-head"><span class="call-tag">Tonight’s call</span><b id="call-title"></b></div>
+    <p id="call-text"></p>
+    <p id="call-expect" class="call-expect"></p>
+    <div class="call-actions">
+      <button class="small primary" id="call-accept" type="button" data-call-accept>Do it</button>
+      <button class="small" id="call-decline" type="button" data-call-decline>Skip</button>
+    </div>
+  </div>
 </aside>
 
 <section id="panel" class="panel hidden">
   <div class="goods" id="goods"></div>
   <div class="actions">
     <button class="big primary" id="btn-restock" type="button"><span class="btn-title">Restock</span><span class="btn-sub" id="restock-sub">fill the counter</span></button>
-    <button class="big" id="btn-smart" type="button"><span class="btn-title">Smart prices</span><span class="btn-sub">just under the rivals</span></button>
+    <button class="big" id="btn-smart" type="button"><span class="btn-title">Smart prices</span><span class="btn-sub" id="smart-sub">what sells tonight</span></button>
     <div class="status" id="status"><span class="dot"></span><span id="status-text">Ready</span></div>
   </div>
 </section>

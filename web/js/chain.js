@@ -1,7 +1,7 @@
 // Talks to the Lantern Row contract: the player's local key, the public gas pool, views, `act` and
 // `advance_night`, with retries over keys and RPC hosts. The UI never sees a transaction; it sees
 // promises that resolve to game outcomes, and friendly errors when the network is in a mood.
-import { Rpc, RpcError, encodeTx, functionCallAction, hex, implicitAccount, keyFromNearString, keyFromSeed, newKey, nearPublicKey, sign, signTx, sleep, summarise, unhex, utf8 } from './near.js'
+import { Rpc, RpcError, encodeTx, functionCallAction, hex, implicitAccount, keyFromNearString, keyFromSeed, newKey, nearPublicKey, sign, signTx, sleep, summarise, txHash, unhex, utf8 } from './near.js'
 import { CONTRACT, GAS_ACCOUNT, GAS_KEYS, RPC_HOSTS } from './gas-keys.js'
 import { coalesce, signingText } from './logic.js'
 
@@ -84,7 +84,8 @@ export class GasPool {
         e.nonce += 1n
         const tx = encodeTx({ signerId: this.account, publicKey: e.key.publicKey, nonce: e.nonce, receiverId: receiver, blockHash, actions: [functionCallAction({ method, args, gas })] })
         const signed = await signTx(e.key, tx)
-        const res = await this.rpc.sendTx(signed)
+        const hash = await txHash(tx)
+        const res = await this.send(signed, hash)
         this.lastKey = e.public_key
         return summarise(res)
       } catch (err) {
@@ -103,6 +104,42 @@ export class GasPool {
       }
     }
     throw friendly(lastErr)
+  }
+
+  /**
+   * Sends one signed transaction and gets its outcome, even when the RPC times out (a 408 or a
+   * TIMEOUT_ERROR) after the chain already took it. A timeout is followed by asking for the status
+   * by hash; an unknown hash is sent again, the same bytes, so nothing is ever applied twice.
+   */
+  async send(signed, hash) {
+    let timedOut = null
+    for (let round = 0; round < 2; round++) {
+      try {
+        return await this.rpc.sendTx(signed)
+      } catch (err) {
+        if (!(err instanceof RpcError) || !err.transient) {
+          // a used nonce on the second round means the first send did land: look it up
+          if (round > 0 && err instanceof RpcError && err.invalidNonce) {
+            const found = await this.lookup(hash, 8)
+            if (found) return found
+          }
+          throw err
+        }
+        timedOut = err
+      }
+      const found = await this.lookup(hash, 6)
+      if (found) return found
+    }
+    throw timedOut
+  }
+
+  async lookup(hash, tries) {
+    for (let i = 0; i < tries; i++) {
+      await sleep(1200)
+      const r = await this.rpc.txStatus(hash, this.account).catch(() => null)
+      if (r?.status) return r
+    }
+    return null
   }
 }
 
@@ -182,7 +219,14 @@ export class Client {
     for (let attempt = 0; attempt < 3; attempt++) {
       const nonce = ++this.nonce
       const signature = hex(await sign(this.identity.key, utf8(signingText(this.contract, nonce, action))))
-      const r = await this.pool.relay(this.contract, 'act', { player_pubkey: this.identity.account, nonce, action, signature }, ACT_GAS)
+      let r
+      try {
+        r = await this.pool.relay(this.contract, 'act', { player_pubkey: this.identity.account, nonce, action, signature }, ACT_GAS)
+      } catch (e) {
+        // The order may or may not have landed. Read the chain's nonce so views are trusted again.
+        await this.resync()
+        throw e
+      }
       this.record('act', r)
       if (r.failure) {
         // A used nonce means a view lagged behind our own earlier transaction: read it fresh and retry.
@@ -196,6 +240,16 @@ export class Client {
       return r.value
     }
     throw new FriendlyError('The order could not be stamped. Reloading your stall.')
+  }
+
+  /** Brings the local nonce back to what the chain knows, after an order that may not have landed. */
+  async resync() {
+    try {
+      const me = await this.player()
+      this.nonce = me.nonce ?? this.nonce
+    } catch {
+      /* the next view will tell */
+    }
   }
 
   async advanceNight() {

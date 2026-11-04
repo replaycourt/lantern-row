@@ -45,6 +45,18 @@ export function stallHue(id) {
   return (id * 137 + 20) % 360
 }
 
+/** Spots are numbered as the chain numbers them: 0 at the gate, 23 at the back. The NFT says the same. */
+export function spotLabel(spot) {
+  return spot == null ? 'off the row' : `spot ${spot}`
+}
+
+/** "tea, oil and silk" */
+export function listWords(words) {
+  const u = [...new Set(words)]
+  if (u.length <= 1) return u.join('')
+  return `${u.slice(0, -1).join(', ')} and ${u[u.length - 1]}`
+}
+
 // ---- the Dock -----------------------------------------------------------------------------------
 
 /** Cost of q units at the Dock right now (SPEC section 6). */
@@ -63,56 +75,169 @@ export function affordable(good, dock, money, max) {
   return q
 }
 
+// ---- the villagers' minds, exactly as the contract works them out (SPEC section 5) ---------------
+
+export function wealthPct(wallet, wage) {
+  return Math.min(150, 60 + Math.floor((wallet * 40) / (5 * Math.max(1, wage))))
+}
+export function spareNights(wealth) {
+  return Math.floor(Math.max(0, wealth - 100) / 25)
+}
+export function needPeriod(good, taste) {
+  return taste === 0 ? Infinity : Math.max(1, Math.floor((good.need_period * 100) / taste))
+}
+export function eventGood(event, kind) {
+  return event && typeof event === 'object' && event[kind] ? event[kind].good : null
+}
+
+/** What a villager wants tonight: [{good, over}] most overdue first, at most four. */
+export function villagerWants(v, cfg, event) {
+  const wealth = wealthPct(v.wallet, v.wage)
+  const spare = spareNights(wealth)
+  const fest = eventGood(event, 'festival')
+  const out = []
+  cfg.goods.forEach((good, g) => {
+    const taste = v.taste?.[g] ?? 0
+    if (!taste) return
+    const period = needPeriod(good, taste)
+    let unmet = (v.unmet?.[g] ?? 0) + spare
+    if (fest === g) unmet = Math.max(unmet, period) + 1
+    if (unmet >= period) out.push({ good: g, over: unmet - period })
+  })
+  out.sort((a, b) => b.over - a.over)
+  return out.slice(0, 4)
+}
+
+/** The most a villager pays for a good tonight, before stall reputation and memory. */
+export function willingness(good, taste, over, wealth, event, g) {
+  const ev = eventGood(event, 'festival') === g ? 130 : event === 'payday' ? 110 : 100
+  const unmet = 100 + 15 * Math.min(over, 8)
+  return Math.floor((good.fair * taste * unmet * wealth * ev) / 100000000)
+}
+
+/** Willingness at one particular stall: reputation and memory make villagers pay a little more. */
+export function stallWtp(wtp, rep, memory) {
+  return Math.floor((wtp * (100 + Math.floor(rep / 100) + memory)) / 100)
+}
+
+/**
+ * Tonight's demand per good as the contract will see it: who wants what, what each would pay at
+ * this stall, how likely they are to pass by, and what the rivals offer them. Returns one entry per
+ * good: {wanted, rivalStock, rivalMin, buyers: [{name, eff, wallet, reach, units, rivals}]}.
+ */
+export function forecast(world, cfg, stall) {
+  const rivals = (world?.row ?? []).filter((x) => x.id !== stall.id && x.spot != null)
+  const fest = eventGood(world?.event, 'festival')
+  const out = cfg.goods.map((_, g) => {
+    let rivalStock = 0
+    let rivalMin = null
+    for (const x of rivals) {
+      if (x.stock[g] > 0 && x.price[g] > 0) {
+        rivalStock += x.stock[g]
+        rivalMin = rivalMin == null ? x.price[g] : Math.min(rivalMin, x.price[g])
+      }
+    }
+    return { good: g, wanted: 0, rivalStock, rivalMin, buyers: [] }
+  })
+  const mem = (v, id) => v.memory?.find((m) => m[0] === id)?.[1] ?? 0
+  const reach = (spot, remembered) => (spot == null ? 0 : Math.min(1, (100 - 3 * spot + (remembered ? 25 : 0)) / 100))
+  for (const v of world?.villagers ?? []) {
+    const wealth = wealthPct(v.wallet, v.wage)
+    for (const { good: g, over } of villagerWants(v, cfg, world.event)) {
+      const wtp = willingness(cfg.goods[g], v.taste[g], over, wealth, world.event, g)
+      const m = mem(v, stall.id)
+      const eff = stallWtp(wtp, stall.rep, m)
+      const offers = []
+      for (const x of rivals) {
+        if (!(x.stock[g] > 0 && x.price[g] > 0)) continue
+        const mx = mem(v, x.id)
+        const ex = stallWtp(wtp, x.rep, mx)
+        if (x.price[g] > ex || x.price[g] > v.wallet) continue
+        offers.push({ surplus: ex - x.price[g], reach: reach(x.spot, mx > 0), ahead: x.spot < (stall.spot ?? 99) })
+      }
+      out[g].wanted++
+      out[g].buyers.push({ name: v.name, eff, wallet: v.wallet, reach: reach(stall.spot, m > 0), units: fest === g ? 2 : 1, rivals: offers })
+    }
+  }
+  return out
+}
+
+/**
+ * About how many units of a good this stall sells tonight at a price: villagers who want it, can pay
+ * it, pass by, and find no better deal on their walk. Chance, not certainty: the walk is random.
+ */
+export function expectSales(fc, g, price, { stock = Infinity } = {}) {
+  if (!(price > 0) || !fc?.[g]) return 0
+  let e = 0
+  for (const b of fc[g].buyers) {
+    if (b.eff < price || b.wallet < price) continue
+    const mine = b.eff - price
+    let p = b.reach
+    for (const o of b.rivals) if (o.surplus > mine || (o.surplus === mine && o.ahead)) p *= 1 - o.reach
+    e += p * b.units
+  }
+  return Math.min(e, stock)
+}
+
+/** The price that brings the most coin tonight, from the villagers' own willingness. */
+export function bestPrice(fc, g, { floor, ceiling, stock }) {
+  const levels = new Set([floor, ceiling])
+  for (const b of fc[g].buyers) if (b.eff >= floor && b.eff <= ceiling) levels.add(b.eff)
+  if (fc[g].rivalMin && fc[g].rivalMin - 1 >= floor && fc[g].rivalMin - 1 <= ceiling) levels.add(fc[g].rivalMin - 1)
+  let best = null
+  for (const p of [...levels].sort((a, b) => a - b)) {
+    const n = expectSales(fc, g, p, { stock })
+    const take = p * n
+    if (!best || take > best.take * 1.03) best = { price: p, take, sales: n }
+  }
+  return best
+}
+
 // ---- advice -------------------------------------------------------------------------------------
 
 /**
- * A price per good that tends to sell: just under the cheapest rival with stock, never below 125% of
- * the Dock or 95% of fair, never above 140% of fair, plus a premium while a festival or storm
- * concerns the good. Returns [{price, reason}].
+ * A price per good that pays tonight: the price that brings the most coin from the villagers who
+ * want the good, within a band of 125% of the Dock up to 140% of fair (more during a festival or
+ * when nobody else sells it). Returns [{price, reason, sales}].
  */
-export function suggestPrices(world, cfg, stall) {
+export function suggestPrices(world, cfg, stall, fc = forecast(world, cfg, stall)) {
   return cfg.goods.map((good, g) => {
     const unit = world.dock[g].price
-    const rivals = world.row.filter((x) => x.id !== stall.id && x.stock[g] > 0 && x.price[g] > 0).map((x) => x.price[g])
+    const f = fc[g]
+    const fest = eventGood(world.event, 'festival') === g
+    const storm = eventGood(world.event, 'storm') === g
+    const alone = f.rivalStock === 0
     const floor = Math.max(Math.floor((unit * 125) / 100), Math.floor((good.fair * 95) / 100))
-    const ceiling = Math.max(floor, Math.floor((good.fair * 140) / 100))
-    let price, reason
-    if (rivals.length) {
-      const cheapest = Math.min(...rivals)
-      // Villagers favour stalls they remember and stalls with reputation (up to 8% and 10%), so a new
-      // stall has to undercut harder than an established one to win the sale.
-      const under = stall.rep < 300 ? 88 : stall.rep < 450 ? 94 : 97
-      price = Math.floor((cheapest * under) / 100)
-      reason = under === 97 ? `just under the cheapest rival (${cheapest})` : `well under the cheapest rival (${cheapest}) until villagers know you`
+    const ceiling = Math.max(floor, Math.floor((good.fair * (fest ? 175 : alone || (storm && f.rivalStock <= 2) ? 160 : 140)) / 100))
+    const stock = Math.max(stall.stock[g], Math.floor(MIX[g] * (1 + stall.tier / 2)))
+    let price, reason, sales
+    if (f.wanted === 0) {
+      price = f.rivalMin ? Math.min(ceiling, Math.max(floor, f.rivalMin - 1)) : ceiling
+      reason = 'nobody wants it tonight; priced to keep'
+      sales = 0
     } else {
-      price = ceiling
-      reason = 'nobody else sells it tonight'
+      const b = bestPrice(fc, g, { floor, ceiling, stock })
+      price = b.price
+      sales = b.sales
+      if (sales < 0.5) {
+        // nobody can be won at a paying price: sit just under the rivals and wait for needs to grow
+        price = f.rivalMin ? Math.min(ceiling, Math.max(floor, Math.floor((f.rivalMin * 94) / 100))) : floor
+        reason = f.rivalMin ? `under the rivals' ${f.rivalMin}; needs grow each night` : 'as low as still pays'
+      } else if (fest) reason = `festival: ~${Math.round(sales)} would pay it`
+      else if (alone) reason = `nobody else sells it; ~${Math.round(sales)} would pay it`
+      else if (f.rivalMin && price < f.rivalMin) reason = `under the rivals' ${f.rivalMin}; ~${Math.round(sales)} would buy`
+      else reason = `~${Math.round(sales)} would pay it even above the rivals' ${f.rivalMin}`
     }
-    if (price < floor) {
-      price = floor
-      reason = 'as low as still pays'
-    }
-    if (price > ceiling) {
-      price = ceiling
-      reason = 'a fair price'
-    }
-    if (world.event?.festival?.good === g) {
-      price = Math.floor((price * 125) / 100)
-      reason = 'festival: everyone wants it'
-    } else if (world.event?.storm?.good === g) {
-      price = Math.floor((price * 130) / 100)
-      reason = 'storm: scarce at the Dock'
-    }
-    return { price: Math.min(price, good.max_price), reason }
+    return { price: Math.min(price, good.max_price), reason, sales }
   })
 }
 
 /**
  * What to buy to fill the stall towards a sensible mix, within money, capacity and tonight's Dock
- * supply. Buys more of a good the night before a festival or storm for it. Returns
- * {items: [{good, qty, cost}], total}.
+ * supply. Buys more of a good the night before a festival or storm for it, more of what many want
+ * tonight, and none of a good the player chose to wait on. Returns {items: [{good, qty, cost}], total}.
  */
-export function suggestRestock(world, cfg, stall, { reserve = Math.max(150, Math.floor(stall.money * 0.2)) } = {}) {
+export function suggestRestock(world, cfg, stall, { reserve = Math.max(150, Math.floor(stall.money * 0.2)), skip = null, fc = null } = {}) {
   let room = stall.capacity - stall.stock.reduce((a, b) => a + b, 0)
   let money = Math.max(0, stall.money - reserve)
   const soon = world.event_left === 1
@@ -120,10 +245,17 @@ export function suggestRestock(world, cfg, stall, { reserve = Math.max(150, Math
   // Dumplings spoil fast, so they come last; silk and charms are dear, so they come after the staples.
   const order = [0, 1, 4, 3, 2]
   for (const g of order) {
+    if (g === skip) continue
     const good = cfg.goods[g]
-    const fest = (soon && world.event_next?.festival?.good === g) || world.event?.festival?.good === g
-    const storm = soon && world.event_next?.storm?.good === g
-    const target = Math.floor(MIX[g] * (1 + stall.tier / 2) * (fest ? 2 : storm ? 1.5 : 1))
+    const fest = (soon && eventGood(world.event_next, 'festival') === g) || eventGood(world.event, 'festival') === g
+    const storm = soon && eventGood(world.event_next, 'storm') === g
+    let target = Math.floor(MIX[g] * (1 + stall.tier / 2) * (fest ? 2 : storm ? 1.5 : 1))
+    if (fc) {
+      // many want it and the merchants hold little: carry up to what they want, within reason
+      const gap = fc[g].wanted - fc[g].rivalStock
+      if (gap > 0) target = Math.max(target, Math.min(fc[g].wanted, Math.floor(target * 1.6)))
+      else if (fc[g].wanted === 0 && !fest && !storm) target = Math.min(target, Math.ceil(MIX[g] / 2))
+    }
     const want = Math.max(0, target - stall.stock[g])
     const cap = Math.min(want, room, world.dock[g].left, Math.floor((MIX[g] / 28) * 2 * stall.capacity))
     const qty = affordable(good, world.dock[g], Math.floor(money * (g === 3 ? 0.35 : 0.45)), cap)
@@ -188,6 +320,12 @@ export function project(stall, actions, world, cfg) {
       s.money -= cfg.tier_cost[s.tier + 1] ?? 0
       s.tier += 1
       s.capacity = cfg.tier_capacity[s.tier] ?? s.capacity
+      s.service = cfg.tier_service?.[s.tier] ?? s.service
+    }
+    if (a.move) {
+      s.money -= a.move.max_fee ?? 0
+      s.spot = a.move.spot
+      s.footfall = 100 - 3 * a.move.spot
     }
     if (a.rename) s.name = a.rename.name
     if (a.list) s.listed = a.list.price
@@ -204,23 +342,34 @@ export function signingText(contract, nonce, action) {
 // ---- events -------------------------------------------------------------------------------------
 
 export function eventInfo(event, cfg) {
-  if (!event || event === 'quiet') return { kind: 'quiet', title: 'A quiet night', line: 'Nothing special. Trade as usual.', good: null }
-  if (event === 'payday') return { kind: 'payday', title: 'Payday', line: 'Wages are up by half. Villagers spend more freely.', good: null }
+  if (!event || event === 'quiet') return { kind: 'quiet', title: 'A quiet night', short: 'quiet nights', line: 'Nothing special. Trade as usual.', good: null }
+  if (event === 'payday') return { kind: 'payday', title: 'Payday', short: 'Payday', line: 'Wages are up by half. Villagers spend more freely.', good: null }
   const [kind, body] = Object.entries(event)[0]
   const g = body?.good
   const name = cfg?.goods?.[g]?.name ?? GOODS[g]
-  if (kind === 'festival') return { kind, title: `Festival of ${name}`, line: `Everyone wants ${name} tonight and buys two. They pay up to 30% more.`, good: g }
-  if (kind === 'storm') return { kind, title: `Storm at the Dock`, line: `Little ${name} comes in, and the Dock charges half again. Stock up before it hits.`, good: g }
-  if (kind === 'bumper') return { kind, title: `Bumper ${name}`, line: `The Dock is flooded with ${name}: twice the supply at 30% off.`, good: g }
-  return { kind, title: kind, line: '', good: g ?? null }
+  if (kind === 'festival') return { kind, title: `Festival of ${name}`, short: `Festival of ${name}`, line: `Everyone wants ${name} tonight and buys two. They pay up to 30% more.`, good: g }
+  if (kind === 'storm') return { kind, title: `Storm: little ${name}`, short: `Storm on ${name}`, line: `Little ${name} comes in, and the Dock charges half again. Stock up before it hits.`, good: g }
+  if (kind === 'bumper') return { kind, title: `Bumper ${name}`, short: `Bumper ${name}`, line: `The Dock is flooded with ${name}: twice the supply at 30% off.`, good: g }
+  return { kind, title: kind, short: kind, line: '', good: g ?? null }
 }
 
-/** One-line announcement of what comes next, for the banner. */
+/** The banner: what is on tonight, how long it lasts, and what comes next. */
+export function bannerText(world, cfg) {
+  const now = eventInfo(world.event, cfg)
+  const next = eventInfo(world.event_next, cfg)
+  const left = world.event_left ?? 1
+  const parts = []
+  if (now.kind !== 'quiet') parts.push(left > 1 ? `${left} nights left` : 'ends tonight')
+  parts.push(`then ${next.short}`)
+  return { title: now.title, detail: parts.join(' · '), kind: now.kind, good: now.good, next: next }
+}
+
+/** One-line announcement of what comes next. */
 export function forecastLine(world, cfg) {
   const next = eventInfo(world.event_next, cfg)
   const when = world.event_left === 1 ? 'next night' : `in ${world.event_left} nights`
-  if (next.kind === 'quiet') return `Quiet nights ahead (${when}).`
-  return `${next.title} ${when}.`
+  if (next.kind === 'quiet') return `Quiet nights ${when}.`
+  return `${next.short} ${when}.`
 }
 
 // ---- the walk, from a NightLog --------------------------------------------------------------------
@@ -286,7 +435,7 @@ export function bubbleText(kind, good, rand = Math.random) {
 
 /**
  * Explains one night for one stall. `before` is the stall view as it was before the night (may be
- * null), `after` the view afterwards, `log` the NightLog, `world` the world after the night.
+ * null), `stall` the view afterwards, `log` the NightLog, `world` the world after the night.
  * Returns {sold, revenue, lines: [{icon, text}], mood: 'good'|'flat'|'bad', headline}.
  */
 export function summariseNight({ log, stall, before, world, cfg, villagers, nights = 1 }) {
@@ -307,25 +456,33 @@ export function summariseNight({ log, stall, before, world, cfg, villagers, nigh
   const tax = Math.ceil((revenue * (cfg?.sales_tax_pct ?? 5)) / 100)
   const lines = []
   const soldParts = [...perGood].map(([g, e]) => `${e.n} ${gname(g)} for ${fmt(e.coin)}`)
-  if (mine.length) lines.push({ icon: 'coin', text: `Sold ${soldParts.join(', ')}. The town took ${fmt(tax)} in tax.` })
+  if (mine.length) lines.push({ icon: 'coin', text: `Sold ${listWords(soldParts)}. The town took ${fmt(tax)} in tax.` })
 
+  // Sold out: money left on the table, counted from what the others bought and what nobody found.
   const soldOut = (cfg?.goods ?? GOODS).map((_, g) => g).filter((g) => before && before.stock[g] > 0 && stall.stock[g] === 0 && (perGood.get(g)?.n ?? 0) > 0)
-  if (soldOut.length) lines.push({ icon: 'star', text: `Sold out of ${soldOut.map(gname).join(' and ')}. Villagers would have bought more.` })
+  for (const g of soldOut) {
+    const elsewhere = (log.sales ?? []).filter((s) => s[1] !== id && s[2] === g).length
+    const nobody = (log.missed ?? []).filter((m) => m[1] === g).length
+    const more = elsewhere + nobody
+    const tail = more ? ` ${more} more bought ${elsewhere && nobody ? 'it elsewhere or found none' : elsewhere ? 'it elsewhere' : 'nothing: nobody had any'}. Stock more, or charge more.` : ' Stock more next time.'
+    lines.push({ icon: 'star', text: `Sold out of ${gname(g)} after ${perGood.get(g).n}.${tail}` })
+  }
 
   if (refusals.length) {
     const byGood = new Map()
     for (const [v, , g] of refusals) byGood.set(g, [...(byGood.get(g) ?? []), vname(v)])
     for (const [g, names] of byGood) {
+      const price = stall.price[g] || before?.price?.[g] || 0
       const rival = cheapestRival(world, id, g)
-      const tail = rival ? ` ${rival.name} asks ${fmt(rival.price[g])}.` : ''
-      lines.push({ icon: 'frown', text: `${listNames(names)} found your ${gname(g)} too dear at ${fmt(stall.price[g] || before?.price?.[g] || 0)}.${tail}` })
+      const tail = rival && rival.price[g] < price ? ` ${rival.name} asks ${fmt(rival.price[g])}.` : names.length > 1 ? ' Nobody on the row was cheap enough for them.' : ` Nobody on the row was cheap enough for ${names[0]}.`
+      lines.push({ icon: 'frown', text: `${listNames(names)} found your ${gname(g)} too dear at ${fmt(price)}.${tail}` })
     }
   }
 
-  if (spoiled.length) lines.push({ icon: 'leaf', text: `Spoiled: ${spoiled.map(([, g, n]) => `${n} ${gname(g)}`).join(', ')}.` })
+  if (spoiled.length) lines.push({ icon: 'leaf', text: `Spoiled: ${listWords(spoiled.map(([, g, n]) => `${n} ${gname(g)}`))}.` })
   if (before && stall.rent_paid > before.rent_paid) {
     const rent = fmt(stall.rent_paid - before.rent_paid)
-    lines.push({ icon: 'house', text: nights > 1 ? `Rent ${rent} for spot ${stall.spot + 1}, over the ${nights} nights the town traded while nobody watched.` : `Rent ${rent} for spot ${stall.spot + 1}.` })
+    lines.push({ icon: 'house', text: nights > 1 ? `Rent ${rent} for ${spotLabel(stall.spot)}, over the ${nights} nights the town traded while nobody watched.` : `Rent ${rent} for ${spotLabel(stall.spot)}.` })
   }
 
   let mood = mine.length ? 'good' : 'flat'
@@ -334,9 +491,6 @@ export function summariseNight({ log, stall, before, world, cfg, villagers, nigh
     if (why) lines.unshift({ icon: 'moon', text: why })
     if (stall.spot == null) mood = 'bad'
   }
-
-  const wantsMine = (world?.villagers ?? []).filter((v) => v.wants?.some((g) => stall.stock[g] > 0 && stall.price[g] > 0)).length
-  if (wantsMine && stall.spot != null) lines.push({ icon: 'eye', text: `${wantsMine} villagers want something you stock tonight.` })
 
   const headline = mine.length
     ? `${mine.length} sale${mine.length === 1 ? '' : 's'}, +${fmt(revenue - tax)} coin`
@@ -355,7 +509,7 @@ function listNames(names) {
 export function cheapestRival(world, id, g) {
   let best = null
   for (const x of world?.row ?? []) {
-    if (x.id === id || !(x.price[g] > 0) || !(x.stock[g] > 0)) continue
+    if (x.id === id || x.spot == null || !(x.price[g] > 0) || !(x.stock[g] > 0)) continue
     if (!best || x.price[g] < best.price[g]) best = x
   }
   return best
@@ -380,8 +534,8 @@ export function explainNoSales({ stall, before, world, cfg, log }) {
     return `Your prices were above the merchants'. ${r.name} sells ${gname(g)} at ${fmt(r.price[g])}; you asked ${fmt(s.price[g])}.`
   }
   const wanted = (log?.sales ?? []).some(([, , g]) => priced.includes(g))
-  if (!wanted) return `Nobody wanted ${priced.map(gname).join(' or ')} tonight. Needs come round every few nights; they will be back.`
-  if (stall.spot >= 14) return `Only ${stall.footfall}% of villagers walk as far as spot ${stall.spot + 1}. Earn, then move up the row.`
+  if (!wanted) return `Nobody wanted ${listWords(priced.map(gname)).replace(' and ', ' or ')} tonight. Needs come round every few nights; they will be back.`
+  if (stall.spot >= 14) return `Only ${stall.footfall}% of villagers walk as far as ${spotLabel(stall.spot)}. Earn, then move up the row.`
   return `Villagers who passed found what they needed at a stall they remembered. Lower prices a little, and they will remember yours.`
 }
 
@@ -394,13 +548,241 @@ export function catchUpText(advanced, slept) {
   return parts.join(' ')
 }
 
+// ---- tonight's call: one decision a night ----------------------------------------------------------
+
+function buyPlan(world, cfg, stall, g, qty, { reserve = Math.max(120, Math.floor(stall.money * 0.15)) } = {}) {
+  const room = stall.capacity - stall.stock.reduce((a, b) => a + b, 0)
+  const cap = Math.max(0, Math.min(qty, room, world.dock[g].left))
+  const q = affordable(cfg.goods[g], world.dock[g], Math.max(0, stall.money - reserve), cap)
+  return { qty: q, cost: dockCost(cfg.goods[g], world.dock[g], q) }
+}
+
+/**
+ * One readable decision for tonight, drawn from the rules: the event that starts next night, the
+ * festival or payday in force, what sold out or was refused last night, and the gap between what
+ * villagers want tonight and what the merchants hold. Returns null when there is nothing worth asking.
+ * {kind, good, title, text, accept: {label, actions, cost}, decline, expect} or null.
+ */
+export function nightlyCall({ world, cfg, stall, log, fc = forecast(world, cfg, stall) }) {
+  if (!world || !stall || stall.spot == null || stall.listed != null) return null
+  const gname = (g) => cfg.goods[g].name
+  const id = stall.id
+  const prices = suggestPrices(world, cfg, stall, fc)
+  const buy = (g, qty, max_cost) => ({ buy: { stall: id, good: g, qty, max_cost: Math.ceil(max_cost * 1.3) + 2 } })
+  const setPrice = (g, price) => ({ price: { stall: id, good: g, price } })
+  const soon = world.event_left === 1
+  const unit = (g) => world.dock[g].price
+
+  // 1. Something starts next night: stock before it does, or wait for the Dock to get cheap.
+  if (soon) {
+    const fg = eventGood(world.event_next, 'festival')
+    if (fg != null) {
+      const target = Math.max(Math.floor(MIX[fg] * (1 + stall.tier / 2) * 2), Math.min(stall.service ?? 10, fc[fg].wanted * 2))
+      const plan = buyPlan(world, cfg, stall, fg, target - stall.stock[fg])
+      if (plan.qty > 0) {
+        const festPrice = Math.floor((cfg.goods[fg].fair * 150) / 100)
+        return {
+          kind: 'festival-stock', good: fg, night: world.night,
+          title: `Festival of ${gname(fg)} starts next night`,
+          text: `Everyone will want ${gname(fg)} and buy two each, paying up to 30% more. The Dock sells it at ${fmt(unit(fg))} now.`,
+          accept: { label: `Stock ${plan.qty} ${gname(fg)}`, cost: plan.cost, actions: [buy(fg, plan.qty, plan.cost), ...(stall.price[fg] === 0 ? [setPrice(fg, prices[fg].price)] : [])] },
+          decline: { label: 'Skip' },
+          expect: `Could sell for about ${fmt(festPrice)} each: ${fmt(plan.qty * festPrice)} for ${fmt(plan.cost)}.`,
+        }
+      }
+    }
+    const sg = eventGood(world.event_next, 'storm')
+    if (sg != null) {
+      const target = Math.floor(MIX[sg] * (1 + stall.tier / 2) * 1.6)
+      const plan = buyPlan(world, cfg, stall, sg, target - stall.stock[sg])
+      if (plan.qty > 0) {
+        return {
+          kind: 'storm-stock', good: sg, night: world.night,
+          title: `Storm on ${gname(sg)} from next night`,
+          text: `For three nights the Dock gets a quarter of its ${gname(sg)} at half again the price, and the merchants stop restocking it. Buy now at ${fmt(unit(sg))}.`,
+          accept: { label: `Stock ${plan.qty} ${gname(sg)}`, cost: plan.cost, actions: [buy(sg, plan.qty, plan.cost), ...(stall.price[sg] === 0 ? [setPrice(sg, prices[sg].price)] : [])] },
+          decline: { label: 'Skip' },
+          expect: `Scarce ${gname(sg)} sells dearer once the merchants run dry.`,
+        }
+      }
+    }
+    const bg = eventGood(world.event_next, 'bumper')
+    if (bg != null && stall.stock[bg] < MIX[bg] && fc[bg].rivalStock > 0) {
+      return {
+        kind: 'bumper-wait', good: bg, night: world.night, priceThen: unit(bg),
+        title: `Bumper ${gname(bg)} next night`,
+        text: `The Dock will have twice the ${gname(bg)} at 30% off from next night. Yours sits at ${fmt(unit(bg))} a unit now.`,
+        accept: { label: `Wait for cheap ${gname(bg)}`, cost: 0, actions: [], skip: bg },
+        decline: { label: 'Buy now anyway' },
+        expect: `About ${fmt(Math.floor(unit(bg) * 0.7))} a unit tomorrow instead of ${fmt(unit(bg))}.`,
+      }
+    }
+  }
+
+  // 2. A festival in force: price for it, and keep the counter full of it.
+  const fg = eventGood(world.event, 'festival')
+  if (fg != null) {
+    const want = Math.min(stall.service ?? 10, fc[fg].wanted * 2)
+    const plan = buyPlan(world, cfg, stall, fg, want - stall.stock[fg])
+    const price = prices[fg].price
+    const actions = []
+    if (plan.qty > 0) actions.push(buy(fg, plan.qty, plan.cost))
+    if (price > stall.price[fg]) actions.push(setPrice(fg, price))
+    if (actions.length) {
+      const label = plan.qty > 0 && price > stall.price[fg] ? `Stock ${plan.qty} and price at ${fmt(price)}` : plan.qty > 0 ? `Stock ${plan.qty} ${gname(fg)}` : `Raise ${gname(fg)} to ${fmt(price)}`
+      return {
+        kind: 'festival-price', good: fg, night: world.night,
+        title: `Festival of ${gname(fg)} tonight`,
+        text: `${fc[fg].wanted} villagers want ${gname(fg)}, two each, and pay up to 30% more. ${prices[fg].reason[0].toUpperCase()}${prices[fg].reason.slice(1)}.`,
+        accept: { label, cost: plan.qty > 0 ? plan.cost : 0, actions },
+        decline: { label: 'Keep as is' },
+        expect: `About ${Math.round(expectSales(fc, fg, price, { stock: stall.stock[fg] + plan.qty }))} sales at ${fmt(price)}.`,
+      }
+    }
+  }
+
+  // 3. Payday: everyone pays a tenth more.
+  if (world.event === 'payday') {
+    const actions = []
+    cfg.goods.forEach((good, g) => {
+      if (stall.stock[g] > 0 && stall.price[g] > 0) {
+        const p = Math.min(good.max_price, Math.floor((stall.price[g] * 108) / 100))
+        if (p > stall.price[g]) actions.push(setPrice(g, p))
+      }
+    })
+    if (actions.length) {
+      return {
+        kind: 'payday-price', good: null, night: world.night,
+        title: 'Payday tonight',
+        text: 'Wages are up by half and villagers pay about a tenth more than usual. Prices can go up with them.',
+        accept: { label: 'Raise prices 8%', cost: 0, actions },
+        decline: { label: 'Keep prices' },
+        expect: 'More coin per sale; a few more may balk.',
+      }
+    }
+  }
+
+  // 4. Last night: sold out with buyers left over, or refused while a rival was cheaper.
+  if (log && log.night === world.night - 1) {
+    const soldOut = cfg.goods.map((_, g) => g).filter((g) => stall.stock[g] === 0 && (stall.sold_last?.[g] ?? 0) > 0 && fc[g].wanted > 0)
+    const scored = soldOut.map((g) => ({ g, more: (log.sales ?? []).filter((s) => s[1] !== id && s[2] === g).length + (log.missed ?? []).filter((m) => m[1] === g).length })).sort((a, b) => b.more - a.more)
+    if (scored.length && scored[0].more > 0) {
+      const { g, more } = scored[0]
+      const plan = buyPlan(world, cfg, stall, g, Math.min(stall.service ?? 10, stall.sold_last[g] + more))
+      if (plan.qty > 0) {
+        const price = stall.price[g] || prices[g].price
+        return {
+          kind: 'sold-out', good: g, night: world.night,
+          title: `You sold out of ${gname(g)}`,
+          text: `${stall.sold_last[g]} sold last night and ${more} more bought it elsewhere or found none. Tonight ${fc[g].wanted} want it again.`,
+          accept: { label: `Stock ${plan.qty} ${gname(g)}`, cost: plan.cost, actions: [buy(g, plan.qty, plan.cost), ...(stall.price[g] === 0 ? [setPrice(g, price)] : [])] },
+          decline: { label: 'Skip' },
+          expect: `About ${Math.round(expectSales(fc, g, price, { stock: plan.qty }))} sales at ${fmt(price)}.`,
+        }
+      }
+    }
+    const refused = new Map()
+    for (const [, s, g] of log.refusals ?? []) if (s === id) refused.set(g, (refused.get(g) ?? 0) + 1)
+    const worst = [...refused].filter(([g]) => stall.stock[g] > 0 && stall.price[g] > 0 && prices[g].price < stall.price[g]).sort((a, b) => b[1] - a[1])[0]
+    if (worst && worst[1] >= 2) {
+      const [g, n] = worst
+      const price = prices[g].price
+      return {
+        kind: 'price-cut', good: g, night: world.night,
+        title: `${n} walked away from your ${gname(g)}`,
+        text: `They found ${fmt(stall.price[g])} too dear${fc[g].rivalMin ? ` and the merchants ask ${fmt(fc[g].rivalMin)}` : ''}. ${fc[g].wanted} want ${gname(g)} tonight.`,
+        accept: { label: `Drop to ${fmt(price)}`, cost: 0, actions: [setPrice(g, price)] },
+        decline: { label: `Hold at ${fmt(stall.price[g])}` },
+        expect: `About ${Math.round(expectSales(fc, g, price, { stock: stall.stock[g] }))} sales at ${fmt(price)} instead of ${Math.round(expectSales(fc, g, stall.price[g], { stock: stall.stock[g] }))}.`,
+      }
+    }
+  }
+
+  // 5. The gap: villagers want more than the merchants hold.
+  const gaps = cfg.goods.map((_, g) => ({ g, gap: fc[g].wanted - fc[g].rivalStock - stall.stock[g], wanted: fc[g].wanted })).filter((x) => x.wanted >= 2 && x.gap > 0).sort((a, b) => b.gap - a.gap)
+  for (const { g, gap } of gaps) {
+    const plan = buyPlan(world, cfg, stall, g, Math.min(stall.service ?? 10, gap + Math.ceil(fc[g].rivalStock / 2)))
+    if (plan.qty <= 0) continue
+    const price = stall.price[g] || prices[g].price
+    return {
+      kind: 'gap', good: g, night: world.night,
+      title: `${gname(g)[0].toUpperCase()}${gname(g).slice(1)} is short tonight`,
+      text: `${fc[g].wanted} villagers want ${gname(g)}; the merchants hold ${fc[g].rivalStock}${stall.stock[g] ? ` and you ${stall.stock[g]}` : ''}. The Dock sells it at ${fmt(unit(g))}.`,
+      accept: { label: `Stock ${plan.qty} ${gname(g)}`, cost: plan.cost, actions: [buy(g, plan.qty, plan.cost), ...(stall.price[g] === 0 ? [setPrice(g, price)] : [])] },
+      decline: { label: 'Skip' },
+      expect: `About ${Math.round(expectSales(fc, g, price, { stock: stall.stock[g] + plan.qty }))} sales at ${fmt(price)}.`,
+    }
+  }
+
+  // 6. Nothing is short: undercut the merchants on the most-wanted good you can carry.
+  const popular = cfg.goods.map((_, g) => g).filter((g) => fc[g].wanted >= 2 && fc[g].rivalMin).sort((a, b) => fc[b].wanted - fc[a].wanted)[0]
+  if (popular != null) {
+    const g = popular
+    const price = prices[g].price
+    const plan = stall.stock[g] < Math.ceil(fc[g].wanted / 2) ? buyPlan(world, cfg, stall, g, Math.ceil(fc[g].wanted / 2) - stall.stock[g]) : { qty: 0, cost: 0 }
+    const actions = []
+    if (plan.qty > 0) actions.push(buy(g, plan.qty, plan.cost))
+    if (price !== stall.price[g]) actions.push(setPrice(g, price))
+    if (actions.length) {
+      return {
+        kind: 'undercut', good: g, night: world.night,
+        title: `${fc[g].wanted} want ${gname(g)} tonight`,
+        text: `The merchants hold ${fc[g].rivalStock} and ask ${fmt(fc[g].rivalMin)}. ${prices[g].reason[0].toUpperCase()}${prices[g].reason.slice(1)}.`,
+        accept: { label: plan.qty > 0 ? `Stock ${plan.qty} at ${fmt(price)}` : `Price at ${fmt(price)}`, cost: plan.cost, actions },
+        decline: { label: 'Skip' },
+        expect: `About ${Math.round(expectSales(fc, g, price, { stock: stall.stock[g] + plan.qty }))} sales at ${fmt(price)}.`,
+      }
+    }
+  }
+  return null
+}
+
+/** How the call turned out, once the night has been played. {met, text} */
+export function judgeCall(call, { log, stall, before, world, cfg, accepted }) {
+  if (!call || !log) return null
+  const gname = (g) => cfg.goods[g].name
+  const g = call.good
+  const sold = g == null ? (log.sales ?? []).filter((s) => s[1] === stall.id).length : (log.sales ?? []).filter((s) => s[1] === stall.id && s[2] === g).length
+  const coin = (log.sales ?? []).filter((s) => s[1] === stall.id && (g == null || s[2] === g)).reduce((a, s) => a + s[3], 0)
+  const refused = g == null ? 0 : (log.refusals ?? []).filter((r) => r[1] === stall.id && r[2] === g).length
+  const elsewhere = g == null ? 0 : (log.sales ?? []).filter((s) => s[1] !== stall.id && s[2] === g).length
+  if (!accepted) {
+    if (call.kind === 'bumper-wait') return { met: null, text: `You bought ${gname(g)} before the bumper night.` }
+    if (g == null) return { met: null, text: 'You kept your prices on payday.' }
+    return { met: null, text: `You skipped ${gname(g)}: ${elsewhere ? `${elsewhere} bought it from the merchants tonight` : 'nobody bought it on the row tonight'}.` }
+  }
+  switch (call.kind) {
+    case 'bumper-wait': {
+      const now = world?.dock?.[g]?.price
+      const was = call.priceThen
+      const met = now != null && was != null ? now < was : null
+      return { met, text: met ? `Your call: ${gname(g)} at the Dock fell from ${fmt(was)} to ${fmt(now)}. Restock now.` : `Your call: the Dock's ${gname(g)} is at ${fmt(now)}.` }
+    }
+    case 'payday-price': {
+      const met = sold >= 3 && refused <= sold
+      return { met, text: met ? `Your call paid off: ${sold} sales at payday prices, ${fmt(coin)} coin.` : `Your call: ${sold} sales at payday prices${refused ? `, ${refused} balked` : ''}.` }
+    }
+    case 'price-cut': {
+      const met = sold >= 1
+      return { met, text: met ? `Your call paid off: ${gname(g)} at the lower price sold ${sold} for ${fmt(coin)}.` : `Your call: nobody bought ${gname(g)} even at the lower price${elsewhere ? `; ${elsewhere} bought it elsewhere` : ''}.` }
+    }
+    default: {
+      const bought = call.accept?.qty ?? call.accept?.actions?.find((a) => a.buy)?.buy?.qty ?? 0
+      const met = sold >= Math.max(1, Math.ceil(bought / 2))
+      if (met) return { met, text: `Your call paid off: ${sold} ${gname(g)} sold for ${fmt(coin)}${call.accept?.cost ? ` (stock cost ${fmt(call.accept.cost)})` : ''}.` }
+      const lasting = call.kind === 'festival-stock' ? ' The festival lasts two nights.' : call.kind === 'storm-stock' ? ' The storm lasts three nights; the merchants run dry first.' : ''
+      return { met, text: `Your call: ${sold ? `only ${sold}` : 'none'} of the ${gname(g)} sold tonight${refused ? `, ${refused} found it too dear` : ''}.${lasting}` }
+    }
+  }
+}
+
 // ---- tutorial -----------------------------------------------------------------------------------
 
 export const TUTORIAL = [
-  { id: 'restock', text: 'This is your stall. Tap Restock to fill the counter.', done: (s) => s.restocked },
+  { id: 'restock', text: 'This is your stall. Tap Restock to fill the counter at tonight’s Dock prices.', done: (s) => s.restocked },
   { id: 'price', text: 'Now set prices. Tap Smart prices, or nudge each one with − and +.', done: (s) => s.priced },
-  { id: 'wait', text: 'When the clock runs out, villagers walk the row and buy.', done: (s) => s.walked },
-  { id: 'first', text: (s) => (s.firstSale ? `You sold your first ${s.firstSale}! Coins stay in your stall.` : 'Nobody bought this time. The summary says why. Price just under the merchants.'), done: (s) => s.walked >= 2 },
+  { id: 'wait', text: 'When the clock runs out, villagers walk the row and buy. Each card says how many want the good tonight.', done: (s) => s.walked },
+  { id: 'first', text: (s) => (s.firstSale ? `You sold your first ${s.firstSale}! Coins stay in your stall. Every night brings one call to make.` : 'Nobody bought this time. The summary says why. Price just under the merchants.'), done: (s) => s.walked >= 2 },
   { id: 'rival', text: (s) => `Beat ${s.rivalName ?? 'The Quiet Kettle'}: it sits near the gate, where everyone passes. Earn, then move up the row.`, done: (s) => s.walked >= 4 },
   { id: 'deed', text: 'Your stall is a deed you own. Open it from the top bar to grow, move or sell it.', done: (s) => s.openedDeed },
 ]
@@ -413,4 +795,9 @@ export function tutorialStep(progress) {
 /** The leaderboard rank of a stall, or null. */
 export function rankOf(board, id) {
   return board.find((r) => r.id === id)?.rank ?? null
+}
+
+/** The ranks worth showing: stalls on the row, plus the player's own wherever it is, renumbered. */
+export function visibleBoard(board, myId) {
+  return board.filter((r) => r.spot != null || r.id === myId).map((r, i) => ({ ...r, rank: i + 1 }))
 }

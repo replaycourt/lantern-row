@@ -1,6 +1,6 @@
 // DOM side of the client: the HUD, the goods counter, hints, the night summary, sheets, toasts.
 // Everything that comes from the chain goes through escapeHtml before it touches innerHTML.
-import { GOOD_SHORT, escapeHtml as esc, fmt, shortAccount, stallHue, eventInfo, forecastLine, cheapestRival } from './logic.js'
+import { GOOD_SHORT, escapeHtml as esc, fmt, shortAccount, eventInfo, bannerText, cheapestRival, expectSales, spotLabel } from './logic.js'
 
 export const $ = (id) => document.getElementById(id)
 
@@ -33,7 +33,7 @@ export function buildGoods(cfg, { onPrice, onCard }) {
     el.innerHTML = `
       <div class="icon">${ICONS[g]}</div>
       <div class="gname"><span>${esc(GOOD_SHORT[g] ?? good.name)}</span><span class="sold" data-sold></span></div>
-      <div class="stock"><b data-stock>0</b> in stock</div>
+      <div class="stock"><b data-stock>0</b> in stock<span class="want" data-want></span></div>
       <div class="price-row">
         <button class="dec" type="button" aria-label="Lower the price of ${esc(good.name)}">−</button>
         <div class="price" data-price><span data-p>–</span><small data-hint></small></div>
@@ -46,8 +46,9 @@ export function buildGoods(cfg, { onPrice, onCard }) {
   })
 }
 
-export function renderGoods(stall, { cfg, world, pendingGoods = new Set(), suggestions }) {
+export function renderGoods(stall, { cfg, world, pendingGoods = new Set(), fc = null, reasons = null }) {
   const cards = $('goods').children
+  const ev = world ? eventInfo(world.event, cfg) : null
   for (let g = 0; g < cards.length; g++) {
     const el = cards[g]
     const stock = stall.stock[g]
@@ -60,13 +61,25 @@ export function renderGoods(stall, { cfg, world, pendingGoods = new Set(), sugge
     el.querySelector('[data-p]').textContent = price === 0 ? 'off' : fmt(price)
     const rival = world ? cheapestRival(world, stall.id, g) : null
     const hint = el.querySelector('[data-hint]')
-    if (rival) hint.textContent = `rivals ${fmt(rival.price[g])}`
-    else if (world) hint.textContent = `dock ${fmt(world.dock[g].price)}`
-    else hint.textContent = ''
+    const parts = []
+    if (rival) parts.push(`rivals ${fmt(rival.price[g])}`)
+    else if (world) parts.push(`dock ${fmt(world.dock[g].price)}`)
+    const f = fc?.[g]
+    if (f && price > 0 && stock > 0 && f.wanted > 0) {
+      const n = expectSales(fc, g, price, { stock })
+      parts.push(n >= 0.5 ? `~${Math.round(n)} sell` : 'few buy')
+    }
+    hint.textContent = parts.join(' · ')
+    p.title = reasons?.[g] ? `Smart price: ${reasons[g].price}, ${reasons[g].reason}` : ''
     const sold = stall.sold_last?.[g] ?? 0
     el.querySelector('[data-sold]').textContent = sold ? `sold ${sold}` : ''
-    const ev = world ? eventInfo(world.event, cfg) : null
-    el.classList.toggle('hot', !!ev && ev.good === g && ev.kind === 'festival')
+    const want = el.querySelector('[data-want]')
+    want.textContent = f ? (f.wanted ? ` · ${f.wanted} want` : ' · none want') : ''
+    const short = !!f && f.wanted > f.rivalStock + stock
+    el.classList.toggle('short', short)
+    el.classList.toggle('slow', !!f && f.wanted === 0)
+    el.classList.toggle('hot', !!ev && ev.good === g)
+    el.classList.toggle('storm', !!ev && ev.good === g && ev.kind === 'storm')
   }
 }
 
@@ -95,8 +108,7 @@ export function renderHud({ stall, rank, total }) {
   }
   lastMoney = stall.money
   m.textContent = fmt(stall.money)
-  const where = stall.spot == null ? 'off the row' : `spot ${stall.spot + 1}`
-  $('hud-worth').textContent = `worth ${fmt(stall.worth)} · ${rank ? `#${rank} of ${total}` : where}`
+  $('hud-worth').textContent = `worth ${fmt(stall.worth)} · ${rank ? `#${rank} of ${total}` : spotLabel(stall.spot)}`
 }
 
 export function renderNight(world) {
@@ -111,11 +123,11 @@ export function renderClock(fraction, { walking }) {
 }
 
 export function renderEvent(world, cfg) {
-  const info = eventInfo(world.event, cfg)
+  const info = bannerText(world, cfg)
   const b = $('event-banner')
   b.className = `event-banner ${info.kind}`
-  $('event-title').textContent = info.title + (info.kind !== 'quiet' && world.event_left > 1 ? ` (${world.event_left} nights)` : '')
-  $('event-next').textContent = forecastLine(world, cfg)
+  $('event-title').textContent = info.title
+  $('event-next').textContent = info.detail
 }
 
 // ---- hint, status, toast ------------------------------------------------------------------------
@@ -151,25 +163,61 @@ export function toast(text, kind = '', ms = 3600) {
 
 // ---- night summary ------------------------------------------------------------------------------
 
-export function showSummary(night, s) {
+/** The night report at the top of the card. `outcome` is how last night's call went: {met, text}. */
+export function showSummary(night, s, outcome = null) {
   const el = $('summary')
   el.className = `summary mood-${s.mood}` // not the bare mood: ".good" is the goods card
+  $('summary-report').classList.remove('hidden')
   $('summary-night').textContent = `Night ${night}`
   $('summary-headline').textContent = s.headline
   $('summary-lines').innerHTML = s.lines.map((l) => `<li class="${esc(l.icon)}">${esc(l.text)}</li>`).join('')
+  const o = $('summary-outcome')
+  o.className = `summary-outcome ${outcome?.met ? 'met' : outcome?.met === false ? 'missed' : ''}`
+  o.classList.toggle('hidden', !outcome)
+  o.textContent = outcome?.text ?? ''
+  $('summary-stamp').classList.toggle('hidden', !outcome?.met)
+  $('summary-call').classList.add('hidden')
+}
+
+/** Tonight's call: one decision with two buttons. Shows alone when there is no report to put it under. */
+export function showCall(call, { alone = false } = {}) {
+  const el = $('summary')
+  if (alone) {
+    el.className = 'summary mood-call'
+    $('summary-report').classList.add('hidden')
+  }
+  $('call-title').textContent = call.title
+  $('call-text').textContent = call.text
+  $('call-expect').textContent = call.expect ?? ''
+  $('call-accept').textContent = call.accept.cost ? `${call.accept.label} · ${fmt(call.accept.cost)}` : call.accept.label
+  $('call-decline').textContent = call.decline?.label ?? 'Skip'
+  $('summary-call').classList.remove('hidden')
+  el.classList.remove('hidden')
+}
+export function hideCall() {
+  $('summary-call').classList.add('hidden')
+  if ($('summary-report').classList.contains('hidden')) hideSummary()
 }
 export function hideSummary() {
   $('summary').classList.add('hidden')
+}
+export function summaryVisible() {
+  return !$('summary').classList.contains('hidden')
+}
+export function callVisible() {
+  return summaryVisible() && !$('summary-call').classList.contains('hidden')
 }
 
 // ---- sheets -------------------------------------------------------------------------------------
 
 export function openSheet(title, html) {
   $('sheet-title').textContent = title
-  $('sheet-body').innerHTML = html
+  const body = $('sheet-body')
+  body.innerHTML = html
+  body.scrollTop = 0
   $('sheet').classList.remove('hidden')
   $('sheet-backdrop').classList.remove('hidden')
-  return $('sheet-body')
+  return body
 }
 export function closeSheet() {
   $('sheet').classList.add('hidden')
@@ -182,19 +230,19 @@ export function sheetOpen() {
 export function deedHtml({ stall, token, cfg, account, royaltyPct, freeSpots }) {
   const goods = stall.stock.reduce((a, b) => a + b, 0)
   const holders = stall.holders?.length ? `<p class="holders">Earlier owners: ${stall.holders.map((h) => `<code>${esc(shortAccount(h))}</code>`).join(', ')}</p>` : '<p class="holders">You are the first owner.</p>'
-  const media = token?.metadata?.media?.startsWith('data:image/svg+xml') ? `<img src="${esc(token.metadata.media)}" alt="The stall as the chain draws it" width="96" height="96">` : ''
+  const media = token?.metadata?.media?.startsWith('data:image/svg+xml') ? `<img class="deed-nft" src="${esc(token.metadata.media)}" alt="The stall as the chain draws it" width="200" height="200">` : '<div class="deed-nft deed-nft-empty">picture loading…</div>'
   const upgradeCost = cfg.tier_cost[stall.tier + 1]
   const frozen = stall.listed != null
   const moveButtons = (freeSpots ?? [])
     .slice(0, 3)
-    .map((s) => `<button class="small" type="button" data-move="${s.spot}" ${frozen || stall.money < s.fee ? 'disabled' : ''}>Move to spot ${s.spot + 1} <small>· ${fmt(s.fee)}</small></button>`)
+    .map((s) => `<button class="small" type="button" data-move="${s.spot}" ${frozen || stall.money < s.fee ? 'disabled' : ''}>Move to ${spotLabel(s.spot)} <small>· ${fmt(s.fee)}</small></button>`)
     .join('')
   return `
-    <div class="deed" style="--hue:${stallHue(stall.id)}">
+    <div class="deed">
       <div class="deed-title">${esc(stall.name)}</div>
-      <p class="deed-sub">Stall No. ${stall.id} on Lantern Row · ${stall.spot == null ? 'off the row' : `spot ${stall.spot + 1} of 24`} · size ${stall.tier + 1}${frozen ? ' · <span class="listed-tag">FOR SALE</span>' : ''}</p>
+      <p class="deed-sub">Stall No. ${stall.id} on Lantern Row · ${stall.spot == null ? 'off the row' : `spot ${stall.spot} of 0–23`} · size ${stall.tier + 1}${frozen ? ' · <span class="listed-tag">FOR SALE</span>' : ''}</p>
       <div class="deed-art">
-        <div>${media}</div>
+        <div class="deed-pic">${media}<small>the token’s own picture, drawn by the contract</small></div>
         <div class="deed-stats">
           <div><span>coin inside</span><b>${fmt(stall.money)}</b></div>
           <div><span>goods inside</span><b>${fmt(goods)}</b></div>
@@ -215,7 +263,7 @@ export function deedHtml({ stall, token, cfg, account, royaltyPct, freeSpots }) 
       ${stall.tier < 3 ? `<button class="small primary" type="button" data-upgrade ${frozen || stall.money < upgradeCost ? 'disabled' : ''}>Upgrade <small>· ${fmt(upgradeCost)}</small></button>` : ''}
       ${moveButtons || '<span class="muted">No free spot ahead of you right now.</span>'}
     </div>
-    <p class="muted">Spots nearer the gate see more villagers: spot 1 has 100% walk-by, spot 24 has 31%.</p>
+    <p class="muted">Spots nearer the gate see more villagers: spot 0 has 100% walk-by, spot 23 has 31%.</p>
 
     <h3>Sell the whole stall</h3>
     <p>The stall is a token that holds its own coin and goods. Whoever buys it gets all of it. ${cfg.sales_tax_pct}% tax and ${royaltyPct}% founder royalty come off the price.</p>
@@ -235,11 +283,11 @@ export function boardHtml(board, myId) {
   const rows = board
     .map((r) => {
       const cls = r.id === myId ? 'me' : r.npc ? 'npc' : 'player'
-      const sub = r.spot == null ? 'off the row' : `spot ${r.spot + 1} · size ${r.tier + 1}`
+      const sub = r.spot == null ? 'off the row' : `${spotLabel(r.spot)} · size ${r.tier + 1}`
       return `<li class="${cls}"><span class="rank">${r.rank}</span><span class="who">${esc(r.name)}<small>${sub}</small></span><span class="worth">${fmt(r.worth)}</span></li>`
     })
     .join('')
-  return `<p class="muted">Net worth: coin, goods at Dock value, stall size and half the spot's fee. Merchants trade by fixed rules; players are people like you on the same street.</p><ol class="board">${rows}</ol>`
+  return `<p class="muted">Stalls on the row, by net worth: coin, goods at Dock value, stall size and half the spot's fee. Merchants trade by fixed rules; players are people like you on the same street.</p><ol class="board">${rows}</ol>`
 }
 
 export function proofHtml({ contract, account, stallId, rpcHost, gasKey, txs, codeHash, explorer }) {
@@ -283,14 +331,17 @@ export function showPeek(stall, cfg, { x, y, mine, canBuy, onBuy, onClose }) {
     .join('')
   el.innerHTML = `
     <b>${esc(stall.name)}</b> <span class="muted">${stall.npc ? '· merchant' : mine ? '· yours' : '· player'}</span>
-    <div class="muted">spot ${stall.spot == null ? '–' : stall.spot + 1} · ${stall.footfall ?? 0}% walk-by · rep ${fmt(stall.rep / 10)}/100 · worth ${fmt(stall.worth)}</div>
+    <div class="muted">${spotLabel(stall.spot)} · ${stall.footfall ?? 0}% walk-by · rep ${fmt(stall.rep / 10)}/100 · worth ${fmt(stall.worth)}</div>
     <table>${rows}</table>
     ${stall.listed != null ? `<p><span class="listed-tag">FOR SALE</span> ${fmt(stall.listed)} coin${canBuy ? ' <button class="small primary" type="button" data-buy>Buy it</button>' : ''}</p>` : ''}
     <button class="close" type="button" aria-label="Close">×</button>`
   document.body.appendChild(el)
   const r = el.getBoundingClientRect()
+  // keep it on screen: never past either edge, never under the top bar, never over the panel
+  const panelTop = $('panel').getBoundingClientRect().top
+  const hudBottom = $('hud').getBoundingClientRect().bottom
   el.style.left = `${Math.max(8, Math.min(window.innerWidth - r.width - 8, x - r.width / 2))}px`
-  el.style.top = `${Math.max(8, Math.min(window.innerHeight - r.height - 8, y - r.height - 24))}px`
+  el.style.top = `${Math.max(hudBottom + 8, Math.min(panelTop - r.height - 8, y - r.height - 24))}px`
   el.querySelector('.close').addEventListener('click', () => {
     hidePeek()
     onClose?.()
