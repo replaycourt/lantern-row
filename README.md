@@ -2,11 +2,37 @@
 
 # Lantern Row
 
-**Run a stall, price your goods, out-trade the merchants.** A night market that never closes: a shared, lantern-lit street where twelve villagers with their own wallets, tastes and memories walk the row every 20 seconds and buy what they need. Every night brings one call to make: stock up before the festival, wait for the Dock to get cheap, undercut The Quiet Kettle on what everyone wants tonight. Grow your stall, and sell it whole when you are done. The entire economy is one NEAR contract with no owner and no way to patch it. Built at NEAR HACKATHON for the `games` and `nfts` tracks.
+**Run a stall, price your goods, out-trade the merchants.** A night market that never closes: a shared, lantern-lit street where twelve villagers with their own wallets, tastes and memories walk the row every 20 seconds and buy what they need. Every night brings one call to make: stock up before the festival, wait for the Dock to get cheap, undercut The Quiet Kettle on what everyone wants tonight. Grow your stall, and sell it whole when you are done. Built at NEAR HACKATHON for the `games` and `nfts` tracks.
+
+**No server, no owner, no admin key.** The whole game is one NEAR contract, and that contract account holds no access keys at all: nobody, its author included, can redeploy it, change a rule, mint coin or take anyone's stall. The page is static files, and every move is signed in your browser and checked by the contract. One million coin existed at founding, and `audit()` still counts exactly one million.
 
 **Play now:** https://replaycourt.github.io/lantern-row/web/ (testnet, play money, no sign-up)
 
 **Demo video (two minutes of real play on testnet):** [web/media/lantern-row-demo.mp4](web/media/lantern-row-demo.mp4), captions in [demo/video/lantern-row-demo.srt](demo/video/lantern-row-demo.srt). How it was made: [demo/video/README.md](demo/video/README.md).
+
+**Judging?** [JUDGE.md](JUDGE.md) is a five-minute path: what to tap, what you should see, the one-command checks, and where each claim lives in the code.
+
+**Check it without an account.** Plain curl against the public testnet RPC; python3 only decodes the view result, which the RPC returns as bytes.
+
+```sh
+# The game contract has no access keys. Expect: "keys":[]
+curl -s https://test.rpc.fastnear.com -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_access_key_list","finality":"final","account_id":"lantern-row.testnet"}}'; echo
+
+# Coin is never created or destroyed. Expect: {"founding":1000000,"total":1000000,...}
+curl -s https://test.rpc.fastnear.com -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"call_function","finality":"final","account_id":"lantern-row.testnet","method_name":"audit","args_base64":"e30="}}' | python3 -c 'import json,sys; print(bytes(json.load(sys.stdin)["result"]["result"]).decode())'
+```
+
+**How it fits the tracks.**
+
+| Prompt | In Lantern Row |
+|---|---|
+| `games`: NPCs with wallets | Twelve villagers each hold a wallet, earn a wage and spend it on what they need. Six merchant stalls restock out of their own coin by fixed rules. |
+| `games`: player-owned markets | A player's stall is a token they own: they stock it, price it, move it, grow it and sell it to another stall. |
+| `games`: economies that evolve without a dev patch | No keys, no admin method. Dock prices, wages, events and merchant prices move by the contract's own rules, and any visitor's browser closes a night that is due. |
+| `games`: players never notice the chain | No wallet, sign-up, seed phrase or gas fee. The browser makes its own key, a pool of public relay keys pays the gas, and transaction hashes and gas stay out of sight unless you open the *Proof* drawer. |
+| `nfts`: NFTs as accounts that own money | A stall's coin is stored under its token id and goes wherever the token goes. |
+| `nfts`: earn royalties | A stall earns coin from every villager it serves. Its founder gets 5% of every resale, in coin on the row and in NEAR through `nft_payout`. |
+| `nfts`: hold inventory | Goods, prices, reputation and spot are stored under the token id too. The token's picture and description are computed from them. |
 
 <p align="center"><img src="docs/shots/mid-night.png" alt="Villagers walking the row at night, coins flying" width="720"></p>
 
