@@ -67,7 +67,7 @@ export function renderGoods(stall, { cfg, world, pendingGoods = new Set(), fc = 
     const f = fc?.[g]
     if (f && price > 0 && stock > 0 && f.wanted > 0) {
       const n = expectSales(fc, g, price, { stock })
-      parts.push(n >= 0.5 ? `~${Math.round(n)} sell` : 'few buy')
+      parts.push(n >= 0.5 ? `${Math.round(n)} may buy` : 'few buy')
     }
     hint.textContent = parts.join(' · ')
     p.title = reasons?.[g] ? `Smart price: ${reasons[g].price}, ${reasons[g].reason}` : ''
