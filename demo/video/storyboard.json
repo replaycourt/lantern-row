@@ -1,0 +1,159 @@
+{
+  "_readme": "The demo video, scene by scene: which stretch of which recorded take is shown, at what speed, with which narration. Clip anchors point at events in the take's events.jsonl: \"click:Restock-1\" is one second before the click on Restock, \"night#2+0.5\" half a second after the second night change, a number is seconds into the take. A scene lasts as long as its clips or its narration, whichever is longer; a clip that runs out holds its last frame. *text* in a caption is coloured. See README.md.",
+  "meta": {
+    "title": "Lantern Row",
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "videoBitrate": 7000000,
+    "audioBitrate": 160000,
+    "takes": ["play", "deed"],
+    "contract": "lantern-row.testnet"
+  },
+  "voice": {
+    "engine": "piper",
+    "name": "en_US-lessac-high",
+    "lengthScale": 1.2,
+    "noiseScale": 0.5,
+    "noiseW": 0.6,
+    "sentenceSilence": 0.3,
+    "sceneLeadIn": 0.4,
+    "cueGap": 0.4,
+    "sceneTail": 0.5,
+    "endHold": 1.0,
+    "captionHold": 0.7
+  },
+  "scenes": [
+    {
+      "id": "title",
+      "badge": false,
+      "cursor": false,
+      "captionPos": "bottom",
+      "clip": { "from": "title-ready+0.3", "to": "click:name field-0.3" },
+      "cues": [
+        { "caption": "Lantern Row: a night market on NEAR. Run a stall and out-trade the merchants." }
+      ]
+    },
+    {
+      "id": "open",
+      "clips": [
+        { "from": "click:name field-0.3", "to": "click:Open your stall+0.5", "speed": 1.25 },
+        { "from": "click:Open your stall+0.5", "to": "entered-0.4", "speed": 3 },
+        { "from": "entered-0.4", "to": "click:Restock-1.0" }
+      ],
+      "cues": [
+        { "caption": "One tap opens a stall. No wallet, no sign-up: your browser makes a key, and that key owns the stall." },
+        { "caption": "Minted on chain, and there it is on the street." }
+      ]
+    },
+    {
+      "id": "restock",
+      "clip": { "from": "click:Restock-1.0", "to": "walk-start#1+3.5" },
+      "cues": [
+        { "caption": "*Restock* fills the counter from the Dock. *Smart prices* sets what sells tonight." },
+        { "caption": "Each card says how many want the good, and how many will buy at your price." }
+      ]
+    },
+    {
+      "id": "night",
+      "fit": "stretch",
+      "clip": { "from": "walk-start#1+3.5", "to": "walk-end#1+0.3" },
+      "cues": [
+        { "caption": "Every 20 seconds, twelve villagers walk the row with their own wallets and tastes. Coins fly when they buy." }
+      ]
+    },
+    {
+      "id": "report",
+      "captionPos": "right",
+      "clips": [
+        { "from": "walk-end#1+0.3", "to": "click:call: Stock 6 lamp oil+0.4" },
+        { "from": "click:call: Stock 6 lamp oil+0.4", "to": "walk-start#2+1.0", "speed": 2.5 }
+      ],
+      "cues": [
+        { "caption": "The night report: what sold, who walked away, and why." },
+        { "caption": "Then one call to make. A festival of lamp oil starts next night: stock up?" }
+      ]
+    },
+    {
+      "id": "festival",
+      "fit": "stretch",
+      "clip": { "from": "walk-start#2+1.0", "to": "walk-end#2+0.2" },
+      "cues": [
+        { "caption": "The festival comes, with bunting and fireworks, and everyone wants lamp oil." }
+      ]
+    },
+    {
+      "id": "called-it",
+      "captionPos": "right",
+      "clip": { "from": "outcome:paid off: 5 lamp oil-0.3", "to": "click:call: Stock 2 at 45-0.2" },
+      "cues": [
+        { "caption": "The next report says how the call went. When it paid off: *stamped*." }
+      ]
+    },
+    {
+      "id": "deed",
+      "captionPos": "left",
+      "clips": [
+        { "take": "deed", "from": "click:Deed-0.6", "to": "click:List for sale+0.5" }
+      ],
+      "cues": [
+        { "caption": "The deed. A stall is an NFT that holds its own coin and goods: sell it, and all of it goes along." },
+        { "caption": "The founder earns 5% of every resale. List it, and the sign goes up." }
+      ]
+    },
+    {
+      "id": "for-sale",
+      "clips": [
+        { "take": "deed", "from": "click:List for sale+0.5", "to": "click:Ranks-0.4" }
+      ],
+      "cues": [
+        { "caption": "*For sale* on the street, for anyone with the coin." }
+      ]
+    },
+    {
+      "id": "ranks",
+      "captionPos": "left",
+      "clips": [
+        { "take": "deed", "from": "click:Ranks-0.4", "to": "click:close#1+0.3" }
+      ],
+      "cues": [
+        { "caption": "Ranks: your stall against the six merchants, and every other player on the row." }
+      ]
+    },
+    {
+      "id": "proof",
+      "captionPos": "left",
+      "clips": [
+        { "take": "deed", "from": "click:Proof-0.4", "to": "click:close#2+0.2" }
+      ],
+      "cues": [
+        { "caption": "Every tap was a real transaction on NEAR testnet. The proof drawer lists each one." }
+      ]
+    },
+    {
+      "id": "why",
+      "badge": false,
+      "cursor": false,
+      "card": {
+        "heading": "Why NEAR",
+        "points": [
+          { "title": "An unpatchable shared world", "text": "The contract has no keys. Nobody can change a rule or mint coin: one closed economy, the same for everyone." },
+          { "title": "Stalls are NFTs that own money and stock", "text": "The token is the account: coin, goods, prices and reputation live under the token id and move with it." },
+          { "title": "Play with no wallet", "text": "Your browser's key signs each order; scoped relay keys pay the gas and can only call the game." }
+        ],
+        "links": [
+          { "label": "code", "url": "github.com/replaycourt/lantern-row" },
+          { "label": "play", "url": "replaycourt.github.io/lantern-row/web/" }
+        ],
+        "question": "Where would you put your stall: *by the gate*, or where the rent is low?"
+      },
+      "cues": [
+        { "caption": "Why NEAR. The contract has no keys: nobody can patch a rule or mint coin. One closed economy for everyone." },
+        { "caption": "Stalls are NFTs that own money and stock. The token is the account." },
+        { "caption": "And play needs no wallet: the browser's key signs, scoped relay keys pay the gas." },
+        { "caption": "Code and a playable testnet build are linked below." },
+        { "caption": "Where would you put your stall: by the gate, or where the rent is low?" }
+      ]
+    }
+  ]
+}

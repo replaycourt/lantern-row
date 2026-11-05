@@ -8,7 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
-export async function launchChrome({ port, profileDir, width = 1366, height = 820, mobile = false, headless = true }) {
+export async function launchChrome({ port, profileDir, width = 1366, height = 820, mobile = false, headless = true, extraArgs = [] }) {
   mkdirSync(profileDir, { recursive: true })
   const args = [
     `--remote-debugging-port=${port}`,
@@ -20,6 +20,7 @@ export async function launchChrome({ port, profileDir, width = 1366, height = 82
     '--autoplay-policy=no-user-gesture-required',
     '--hide-scrollbars',
     `--window-size=${width},${height}`,
+    ...extraArgs,
     'about:blank',
   ]
   if (headless) args.unshift('--headless=new')
@@ -73,8 +74,10 @@ export class Page {
     this.id = 0
     this.pending = new Map()
     this.console = []
+    this.handlers = new Map() // method -> fn(params), for events a caller wants (screencast frames, …)
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data)
+      if (m.method && this.handlers.has(m.method)) this.handlers.get(m.method)(m.params)
       if (m.id && this.pending.has(m.id)) {
         const { res, rej } = this.pending.get(m.id)
         this.pending.delete(m.id)
@@ -85,6 +88,11 @@ export class Page {
         this.console.push(`exception: ${m.params.exceptionDetails.text} ${m.params.exceptionDetails.exception?.description ?? ''}`)
       }
     }
+  }
+
+  /** Registers a handler for a protocol event, e.g. 'Page.screencastFrame'. */
+  on(method, fn) {
+    this.handlers.set(method, fn)
   }
 
   send(method, params = {}) {

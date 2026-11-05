@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lantern Row demo compositor</title>
+<style>
+  :root {
+    --indigo: #0f0d2b; --ink: #2a1d2e; --cream: #fff3dc; --paper: #fbf1dd; --amber: #ffcf5a; --ember: #f0883b; --rose: #e8503a; --jade: #6fbf9a;
+    --glass: rgba(20, 14, 44, 0.78); --line: rgba(255, 220, 170, 0.18);
+    --font: ui-rounded, "SF Pro Rounded", "Nunito", "Avenir Next Rounded", "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  }
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--indigo); font-family: var(--font); color: var(--cream); }
+  #stage { position: relative; width: 1920px; height: 1080px; }
+  #frame { position: absolute; inset: 0; }
+  .hidden { display: none !important; }
+
+  /* caption: a glass pill in the sky band, like the game's own chips */
+  #caption { position: absolute; top: 176px; left: 0; right: 0; display: flex; justify-content: center; pointer-events: none; }
+  #caption.bottom { top: auto; bottom: 36px; }
+  #caption.right { left: 700px; }
+  #caption.left { right: 720px; }
+  #caption .pill { max-width: 1180px; background: var(--glass); border: 1.5px solid var(--line); border-radius: 26px; padding: 16px 34px; font-size: 38px; line-height: 1.28; font-weight: 700; text-align: center; letter-spacing: 0.005em; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45); backdrop-filter: blur(6px); }
+  #caption .pill em { font-style: normal; color: var(--amber); }
+
+  /* a small live badge, in the free sky left of the HUD buttons */
+  #badge { position: absolute; top: 16px; right: 400px; display: flex; align-items: center; gap: 10px; background: var(--glass); border: 1.5px solid var(--line); border-radius: 999px; padding: 8px 18px 8px 14px; font-size: 20px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: #ffe08a; }
+  #badge .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--jade); box-shadow: 0 0 12px var(--jade); }
+  #badge small { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--cream); opacity: 0.85; }
+
+  /* the hand */
+  #cursor { position: absolute; left: 0; top: 0; width: 42px; height: 54px; pointer-events: none; filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.6)); transform: translate(-6px, -4px); }
+  #ripple { position: absolute; width: 20px; height: 20px; border-radius: 50%; border: 5px solid var(--amber); pointer-events: none; transform: translate(-50%, -50%); box-shadow: 0 0 18px rgba(255, 207, 90, 0.7); }
+
+  /* the end card */
+  #card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding: 42px 0 0; background: radial-gradient(ellipse at 50% 40%, rgba(15, 13, 43, 0.55), rgba(10, 8, 30, 0.92) 70%); }
+  #card canvas { width: 520px; height: 208px; filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.5)); }
+  #card .why { font-size: 26px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; color: var(--amber); margin: 2px 0 18px; opacity: 0.9; }
+  #card ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; width: 1240px; }
+  #card li { display: grid; grid-template-columns: 58px 1fr; gap: 18px; align-items: start; background: var(--glass); border: 1.5px solid var(--line); border-radius: 22px; padding: 18px 28px 18px 20px; opacity: 0; transform: translateY(14px); transition: opacity 0.35s ease, transform 0.35s ease; }
+  #card li.on { opacity: 1; transform: none; }
+  #card li .lamp { width: 50px; height: 50px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #ffe9a8, #ff9a3c 70%); box-shadow: 0 0 22px rgba(255, 154, 60, 0.85); margin-top: 4px; }
+  #card li b { display: block; font-size: 34px; line-height: 1.2; margin-bottom: 4px; }
+  #card li span { font-size: 26px; line-height: 1.3; opacity: 0.86; }
+  #card .links { margin-top: 26px; display: flex; gap: 22px; font-size: 27px; font-weight: 700; opacity: 0; transition: opacity 0.35s ease; }
+  #card .links.on { opacity: 1; }
+  #card .links code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 25px; background: rgba(255, 243, 220, 0.1); border: 1.5px solid var(--line); padding: 8px 18px; border-radius: 999px; color: #ffe08a; }
+  #card .links code small { color: var(--cream); opacity: 0.75; font-family: var(--font); font-size: 22px; margin-right: 8px; }
+  #card .question { margin-top: 24px; font-size: 32px; font-weight: 700; color: var(--paper); background: rgba(255, 243, 220, 0.08); border: 1.5px dashed rgba(255, 220, 170, 0.35); padding: 14px 36px; border-radius: 999px; opacity: 0; transition: opacity 0.35s ease; }
+  #card .question.on { opacity: 1; }
+  #card .question em { font-style: normal; color: var(--amber); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="frame" width="1920" height="1080"></canvas>
+  <div id="badge" class="hidden"><span class="dot"></span><span>Live</span><small>NEAR testnet · lantern-row.testnet</small></div>
+  <div id="card" class="hidden"></div>
+  <div id="caption" class="hidden"><div class="pill"></div></div>
+  <div id="ripple" class="hidden"></div>
+  <svg id="cursor" class="hidden" viewBox="0 0 28 36"><path d="M3 2 L3 27 L9.5 21 L14 31 L18.5 29 L14 19.5 L22.5 19 Z" fill="#fff3dc" stroke="#2a1d2e" stroke-width="2.2" stroke-linejoin="round"/></svg>
+</div>
+<script type="module">
+import { drawLogo } from '../../../web/js/scene.js'
+
+const $ = (id) => document.getElementById(id)
+const ctx = $('frame').getContext('2d')
+ctx.imageSmoothingEnabled = true
+ctx.imageSmoothingQuality = 'high'
+
+let T = null // timeline
+let SB = null // storyboard
+// per take: {url, frames: [{i, t}] (t relative to the recording start), cursor: [{t, x, y}] in page
+// coordinates, clicks: [{t, x, y}], scale: page px -> frame px}
+let TAKES = {}
+const imgCache = new Map()
+const FADE = 0.35
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+/** *text* in a caption is shown in amber. */
+const rich = (s) => esc(s).replace(/\*([^*]+)\*/g, '<em>$1</em>')
+
+window.setup = async function (timeline, storyboard, takes) {
+  T = timeline
+  SB = storyboard
+  for (const [name, take] of Object.entries(takes)) {
+    const rec = take.events.find((e) => e.ev === 'record')
+    const t0 = rec.t
+    TAKES[name] = {
+      url: take.url.replace(/\/$/, ''),
+      frames: take.frames.map((f) => ({ i: f.i, t: f.t - t0 })),
+      cursor: take.events.filter((e) => e.ev === 'cursor' || e.ev === 'click').map((e) => ({ t: e.t - t0, x: e.x, y: e.y })),
+      clicks: take.events.filter((e) => e.ev === 'click').map((e) => ({ t: e.t - t0, x: e.x, y: e.y })),
+      scale: 1920 / (rec.viewport?.[0] ?? 1280),
+    }
+  }
+  // the end card
+  const end = SB.scenes.find((s) => s.card)
+  if (end) {
+    const c = end.card
+    $('card').innerHTML = `
+      <canvas id="logo" width="520" height="208"></canvas>
+      <div class="why">${esc(c.heading)}</div>
+      <ul>${c.points.map((p) => `<li><span class="lamp"></span><div><b>${rich(p.title)}</b><span>${rich(p.text)}</span></div></li>`).join('')}</ul>
+      <div class="links">${c.links.map((l) => `<code><small>${esc(l.label)}</small>${esc(l.url)}</code>`).join('')}</div>
+      <div class="question">${rich(c.question)}</div>`
+    drawLogo($('logo'), { width: 520 })
+  }
+  const first = Object.values(TAKES)[0]
+  const probe = await loadFrame(Object.keys(TAKES)[0], first.frames[0].i)
+  return { takes: Object.fromEntries(Object.entries(TAKES).map(([n, k]) => [n, { frames: k.frames.length, cursorSamples: k.cursor.length, clicks: k.clicks.length }])), source: [probe.naturalWidth, probe.naturalHeight] }
+}
+
+function loadFrame(take, i) {
+  const key = `${take}:${i}`
+  if (imgCache.has(key)) return imgCache.get(key)
+  const img = new Image()
+  img.src = `${TAKES[take].url}/frames/f${String(i).padStart(6, '0')}.jpg`
+  const p = img.decode().then(() => img)
+  imgCache.set(key, p)
+  if (imgCache.size > 12) imgCache.delete(imgCache.keys().next().value)
+  return p
+}
+
+/** The frame number of the take's last frame at or before take time t. */
+function frameAt(take, t) {
+  const F = TAKES[take].frames
+  let lo = 0
+  let hi = F.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (F[mid].t <= t) lo = mid
+    else hi = mid - 1
+  }
+  return F[lo].i
+}
+
+/** Where a scene's picture comes from at output time t: {take, src: take time}, or null for a card-only scene. */
+function sourceTime(scene, t) {
+  if (!scene.segments.length) return null
+  let seg = scene.segments.find((s) => t >= s.start && t < s.end)
+  if (!seg) seg = scene.segments[scene.segments.length - 1]
+  const src = seg.from + Math.max(0, Math.min(seg.end, t) - seg.start) * seg.speed
+  return { take: seg.take, src: Math.min(src, seg.to - 0.001) }
+}
+
+/** The picture a scene ends on, for the crossfade into the next and for a card-only scene's backdrop. */
+function lastPicture(scene) {
+  for (let i = T.scenes.indexOf(scene); i >= 0; i--) {
+    const s = sourceTime(T.scenes[i], T.scenes[i].end - 0.001)
+    if (s) return s
+  }
+  return null
+}
+
+function cursorAt(take, src) {
+  const CURSOR = TAKES[take].cursor
+  if (!CURSOR.length || src < CURSOR[0].t) return null
+  let lo = 0
+  let hi = CURSOR.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (CURSOR[mid].t <= src) lo = mid
+    else hi = mid - 1
+  }
+  const a = CURSOR[lo]
+  const b = CURSOR[lo + 1]
+  if (b && b.t - a.t < 0.2) {
+    const k = (src - a.t) / (b.t - a.t)
+    return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }
+  }
+  return { x: a.x, y: a.y }
+}
+
+window.seek = async function (t) {
+  const scene = T.scenes.find((s) => t >= s.start && t < s.end) ?? T.scenes[T.scenes.length - 1]
+  const sb = SB.scenes.find((s) => s.id === scene.id) ?? {}
+  const sig = []
+
+  // picture: this scene's frame, crossfaded from the previous scene's last one; a card-only scene
+  // keeps the last picture as its backdrop
+  const prevScene = T.scenes[T.scenes.indexOf(scene) - 1]
+  const src = sourceTime(scene, t) ?? (prevScene ? lastPicture(prevScene) : null)
+  if (src) {
+    const frameNo = frameAt(src.take, src.src)
+    const img = await loadFrame(src.take, frameNo)
+    const continuous = prevScene && scene.segments.length && (() => {
+      const p = lastPicture(prevScene)
+      const f = scene.segments[0]
+      return p && p.take === f.take && Math.abs(p.src - f.from) < 0.15
+    })()
+    const fade = prevScene && scene.segments.length && !continuous && t - scene.start < FADE ? (t - scene.start) / FADE : 1
+    const fadeStep = Math.round(fade * 12)
+    ctx.globalAlpha = 1
+    const prev = fadeStep < 12 ? lastPicture(prevScene) : null
+    if (prev) {
+      const prevImg = await loadFrame(prev.take, frameAt(prev.take, prev.src))
+      ctx.drawImage(prevImg, 0, 0, 1920, 1080)
+      ctx.globalAlpha = fade
+    }
+    ctx.drawImage(img, 0, 0, 1920, 1080)
+    ctx.globalAlpha = 1
+    sig.push(`f${src.take}:${frameNo}`, `x${fadeStep}`)
+  }
+
+  // badge
+  const badge = sb.badge !== false && !sb.card
+  $('badge').classList.toggle('hidden', !badge)
+  sig.push(badge ? 'b1' : 'b0')
+
+  // caption
+  const cue = scene.cues.find((c) => t >= c.start && t < c.showUntil)
+  const cap = $('caption')
+  if (cue) {
+    const alpha = Math.min(1, (t - cue.start) / 0.18)
+    const step = Math.round(alpha * 6)
+    cap.querySelector('.pill').innerHTML = rich(cue.caption)
+    cap.className = sb.captionPos ?? ''
+    cap.style.opacity = String(step / 6)
+    cap.style.transform = `translateY(${Math.round((1 - step / 6) * 8)}px)`
+    sig.push(`c${scene.cues.indexOf(cue)}.${step}.${sb.captionPos ?? ''}`)
+  } else {
+    cap.className = 'hidden'
+    sig.push('c-')
+  }
+
+  // cursor and click ripple
+  const live = sourceTime(scene, t)
+  const cur = live && sb.cursor !== false ? cursorAt(live.take, live.src) : null
+  if (cur) {
+    const SCALE = TAKES[live.take].scale
+    const CLICKS = TAKES[live.take].clicks
+    const x = Math.round(cur.x * SCALE)
+    const y = Math.round(cur.y * SCALE)
+    $('cursor').style.transform = `translate(${x - 6}px, ${y - 4}px)`
+    $('cursor').classList.remove('hidden')
+    sig.push(`p${x},${y}`)
+    const click = CLICKS.find((c) => live.src >= c.t && live.src < c.t + 0.5)
+    if (click) {
+      const k = (live.src - click.t) / 0.5
+      const step = Math.round(k * 12)
+      const r = 14 + 46 * (step / 12)
+      const rp = $('ripple')
+      rp.style.left = `${click.x * SCALE}px`
+      rp.style.top = `${click.y * SCALE}px`
+      rp.style.width = rp.style.height = `${r * 2}px`
+      rp.style.opacity = String(1 - step / 12)
+      rp.classList.remove('hidden')
+      sig.push(`r${step}`)
+    } else $('ripple').classList.add('hidden')
+  } else {
+    $('cursor').classList.add('hidden')
+    $('ripple').classList.add('hidden')
+  }
+
+  // the end card: points light up with their cues
+  const card = $('card')
+  if (sb.card) {
+    card.classList.remove('hidden')
+    const items = card.querySelectorAll('li')
+    const cues = scene.cues
+    let shown = 0
+    items.forEach((li, i) => {
+      const on = cues[i] ? t >= cues[i].start - 0.05 : true
+      li.classList.toggle('on', on)
+      if (on) shown++
+    })
+    const linksOn = cues[items.length] ? t >= cues[items.length].start - 0.05 : true
+    card.querySelector('.links').classList.toggle('on', linksOn)
+    const qOn = cues[items.length + 1] ? t >= cues[items.length + 1].start - 0.05 : linksOn
+    card.querySelector('.question').classList.toggle('on', qOn)
+    sig.push(`k${shown}${linksOn ? 'L' : ''}${qOn ? 'Q' : ''}`)
+  } else card.classList.add('hidden')
+
+  return sig.join('|')
+}
+</script>
+</body>
+</html>
