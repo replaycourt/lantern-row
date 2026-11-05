@@ -372,6 +372,26 @@ export function forecastLine(world, cfg) {
   return `${next.short} ${when}.`
 }
 
+/**
+ * The title screen's line about the street, all from the live world: the night, the villagers who
+ * want something tonight (worked out as the contract does), the merchants and the player stalls.
+ * Non-breaking spaces keep each part whole, so a narrow screen wraps only after a dot.
+ */
+export function titleLine(world, cfg) {
+  const count = (n, one, many = `${one}s`) => `${fmt(n)} ${n === 1 ? one : many}`
+  const shoppers = (world.villagers ?? []).filter((v) => villagerWants(v, cfg, world.event).length > 0).length
+  const merchants = world.row.filter((s) => s.npc).length
+  const players = world.row.length - merchants
+  return [
+    `Night ${fmt(world.night)}`,
+    shoppers ? `${count(shoppers, 'villager')} shopping` : 'no villagers shopping',
+    count(merchants, 'merchant'),
+    players ? count(players, 'player stall') : 'no player stalls yet',
+  ]
+    .map((part) => part.replaceAll(' ', '\u00a0'))
+    .join('\u00a0· ')
+}
+
 // ---- the walk, from a NightLog --------------------------------------------------------------------
 
 /**

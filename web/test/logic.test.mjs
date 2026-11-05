@@ -248,6 +248,21 @@ test('event info and forecast read well', () => {
   assert.equal(L.forecastLine({ ...world, event_left: 3, event_next: 'quiet' }, cfg), 'Quiet nights in 3 nights.')
 })
 
+test('title line counts the live street', () => {
+  const line = (w) => L.titleLine(w, cfg).replaceAll('\u00a0', ' ')
+  // Parts never break inside; a narrow screen wraps only after a dot.
+  assert.equal(L.titleLine(quiet, cfg).split(/(?<=·) /).length, 4)
+  assert.ok(!/ /.test(L.titleLine(quiet, cfg).replaceAll('· ', '')))
+  // Ansel and Ines both want something on a quiet night; kettle and uncle are merchants, "me" a player.
+  assert.equal(line(quiet), 'Night 41 · 2 villagers shopping · 2 merchants · 1 player stall')
+  // A villager with nothing overdue and no spare money wants nothing tonight, unless a festival is on.
+  const content = { ...ines, wallet: 0, unmet: [0, 0, 0, 0, 0] }
+  assert.equal(line({ ...quiet, villagers: [ansel, content] }), 'Night 41 · 1 villager shopping · 2 merchants · 1 player stall')
+  assert.equal(line({ ...world, villagers: [ansel, content] }), 'Night 41 · 2 villagers shopping · 2 merchants · 1 player stall')
+  assert.equal(line({ ...quiet, night: 1200, row: [kettle], villagers: [content] }), 'Night 1,200 · no villagers shopping · 1 merchant · no player stalls yet')
+  assert.equal(line({ ...quiet, row: [kettle, me, { ...me, id: 15 }] }), 'Night 41 · 2 villagers shopping · 1 merchant · 2 player stalls')
+})
+
 test('catch-up text only when several nights passed', () => {
   assert.equal(L.catchUpText(1, 0), null)
   assert.match(L.catchUpText(7, 0), /7 nights/)

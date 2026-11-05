@@ -86,8 +86,7 @@ async function boot() {
     if (params.has('poster')) U.$('title').classList.add('poster')
     S.identity = await loadOrCreateIdentity()
     S.me = await client.setIdentity(S.identity)
-    const players = world.row.filter((s) => !s.npc).length
-    U.$('title-line').textContent = `Night ${world.night} on the row · ${world.row.filter((s) => s.npc).length} merchants, ${players} player stall${players === 1 ? '' : 's'} trading`
+    U.$('title-line').textContent = L.titleLine(world, cfg)
     const returning = S.me.stalls?.length > 0
     U.$('name-row').classList.toggle('hidden', returning)
     U.$('start').textContent = returning ? `Back to ${S.me.stalls[0].name}` : 'Open your stall'
