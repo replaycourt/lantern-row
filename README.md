@@ -6,6 +6,8 @@
 
 **Play now:** https://replaycourt.github.io/lantern-row/web/ (testnet, play money, no sign-up)
 
+**Demo video (two minutes of real play on testnet):** [web/media/lantern-row-demo.mp4](web/media/lantern-row-demo.mp4), captions in [demo/video/lantern-row-demo.srt](demo/video/lantern-row-demo.srt). How it was made: [demo/video/README.md](demo/video/README.md).
+
 <p align="center"><img src="docs/shots/mid-night.png" alt="Villagers walking the row at night, coins flying" width="720"></p>
 
 ## How to play

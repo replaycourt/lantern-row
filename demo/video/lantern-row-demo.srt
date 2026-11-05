@@ -1,0 +1,92 @@
+1
+00:00:00,400 --> 00:00:06,513
+Lantern Row: a night market on NEAR.
+Run a stall and out-trade the merchants.
+
+2
+00:00:06,713 --> 00:00:14,683
+One tap opens a stall. No wallet, no sign-up: your
+browser makes a key, and that key owns the stall.
+
+3
+00:00:14,883 --> 00:00:18,717
+Minted on chain. There it is, on the street.
+
+4
+00:00:19,199 --> 00:00:27,333
+*Restock* fills the counter from the Dock.
+*Smart prices* sets what sells tonight.
+
+5
+00:00:27,383 --> 00:00:32,119
+Each card says how many want the good,
+and how many will buy at your price.
+
+6
+00:00:32,319 --> 00:00:40,155
+Every 20 seconds, twelve villagers walk the row with
+their own wallets and tastes. Coins fly when they buy.
+
+7
+00:00:40,632 --> 00:00:44,878
+The night report: what sold, who walked away, and why.
+
+8
+00:00:44,928 --> 00:00:51,020
+Then one call to make. A festival of
+lamp oil starts next night: stock up?
+
+9
+00:00:51,220 --> 00:00:56,826
+The festival comes, with bunting and
+fireworks, and everyone wants lamp oil.
+
+10
+00:00:58,812 --> 00:01:05,430
+The next report says how the call
+went. When it paid off: *stamped*.
+
+11
+00:01:05,630 --> 00:01:12,511
+The deed. A stall is an NFT that holds its own
+coin and goods: sell it, and all of it goes along.
+
+12
+00:01:12,561 --> 00:01:18,558
+The founder earns 5% of every resale.
+List it, and the sign goes up.
+
+13
+00:01:18,758 --> 00:01:23,619
+*For sale* on the street, for anyone with the coin.
+
+14
+00:01:23,819 --> 00:01:29,132
+Ranks: your stall against the six merchants,
+and every other player on the row.
+
+15
+00:01:30,341 --> 00:01:36,361
+Every tap was a real transaction on NEAR
+testnet. The proof drawer lists each one.
+
+16
+00:01:38,376 --> 00:01:46,870
+Why NEAR. The contract has no keys: nobody can patch
+a rule or mint coin. One closed economy for everyone.
+
+17
+00:01:46,920 --> 00:01:51,607
+Stalls are NFTs that own money and
+stock. The token is the account.
+
+18
+00:01:51,657 --> 00:01:57,130
+And no wallet: the browser's key
+signs, scoped relay keys pay the gas.
+
+19
+00:01:57,180 --> 00:02:01,594
+Where would you put your stall: by
+the gate, or where the rent is low?
+

@@ -4,3 +4,14 @@ node_modules/
 *.log
 .DS_Store
 e2e-out/
+# demo video: takes, frames, voice and scratch builds stay out; only the final MP4 goes in
+demo/video/work/
+demo/video/takes/
+takes/
+work/
+frames/
+stills/
+check/
+*.wav
+*.mp4
+!web/media/lantern-row-demo.mp4

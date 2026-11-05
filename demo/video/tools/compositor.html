@@ -32,20 +32,20 @@
   #ripple { position: absolute; width: 20px; height: 20px; border-radius: 50%; border: 5px solid var(--amber); pointer-events: none; transform: translate(-50%, -50%); box-shadow: 0 0 18px rgba(255, 207, 90, 0.7); }
 
   /* the end card */
-  #card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding: 42px 0 0; background: radial-gradient(ellipse at 50% 40%, rgba(15, 13, 43, 0.55), rgba(10, 8, 30, 0.92) 70%); }
+  #card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding: 42px 0 0; background: radial-gradient(ellipse at 50% 40%, rgba(15, 13, 43, 0.82), rgba(10, 8, 30, 0.97) 70%); }
   #card canvas { width: 520px; height: 208px; filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.5)); }
   #card .why { font-size: 26px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; color: var(--amber); margin: 2px 0 18px; opacity: 0.9; }
   #card ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; width: 1240px; }
-  #card li { display: grid; grid-template-columns: 58px 1fr; gap: 18px; align-items: start; background: var(--glass); border: 1.5px solid var(--line); border-radius: 22px; padding: 18px 28px 18px 20px; opacity: 0; transform: translateY(14px); transition: opacity 0.35s ease, transform 0.35s ease; }
+  #card li { display: grid; grid-template-columns: 58px 1fr; gap: 18px; align-items: start; background: var(--glass); border: 1.5px solid var(--line); border-radius: 22px; padding: 18px 28px 18px 20px; opacity: 0; transform: translateY(14px); }
   #card li.on { opacity: 1; transform: none; }
   #card li .lamp { width: 50px; height: 50px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #ffe9a8, #ff9a3c 70%); box-shadow: 0 0 22px rgba(255, 154, 60, 0.85); margin-top: 4px; }
   #card li b { display: block; font-size: 34px; line-height: 1.2; margin-bottom: 4px; }
   #card li span { font-size: 26px; line-height: 1.3; opacity: 0.86; }
-  #card .links { margin-top: 26px; display: flex; gap: 22px; font-size: 27px; font-weight: 700; opacity: 0; transition: opacity 0.35s ease; }
+  #card .links { margin-top: 26px; display: flex; gap: 22px; font-size: 27px; font-weight: 700; opacity: 0; }
   #card .links.on { opacity: 1; }
   #card .links code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 25px; background: rgba(255, 243, 220, 0.1); border: 1.5px solid var(--line); padding: 8px 18px; border-radius: 999px; color: #ffe08a; }
   #card .links code small { color: var(--cream); opacity: 0.75; font-family: var(--font); font-size: 22px; margin-right: 8px; }
-  #card .question { margin-top: 24px; font-size: 32px; font-weight: 700; color: var(--paper); background: rgba(255, 243, 220, 0.08); border: 1.5px dashed rgba(255, 220, 170, 0.35); padding: 14px 36px; border-radius: 999px; opacity: 0; transition: opacity 0.35s ease; }
+  #card .question { margin-top: 24px; font-size: 32px; font-weight: 700; color: var(--paper); background: rgba(255, 243, 220, 0.08); border: 1.5px dashed rgba(255, 220, 170, 0.35); padding: 14px 36px; border-radius: 999px; opacity: 0; }
   #card .question.on { opacity: 1; }
   #card .question em { font-style: normal; color: var(--amber); }
 </style>
@@ -208,7 +208,7 @@ window.seek = async function (t) {
   sig.push(badge ? 'b1' : 'b0')
 
   // caption
-  const cue = scene.cues.find((c) => t >= c.start && t < c.showUntil)
+  const cue = scene.cues.find((c) => t >= c.start && t < c.showUntil && !c.noCaption)
   const cap = $('caption')
   if (cue) {
     const alpha = Math.min(1, (t - cue.start) / 0.18)

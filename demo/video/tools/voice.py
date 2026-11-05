@@ -203,7 +203,7 @@ def main():
             text = cue.get("say", cue["caption"])
             samples = speak(args.work, v, text)
             dur = len(samples) / RATE
-            cues.append({"start": round(cursor, 3), "end": round(cursor + dur, 3), "caption": cue["caption"]})
+            cues.append({"start": round(cursor, 3), "end": round(cursor + dur, 3), "caption": cue["caption"], **({"noCaption": True} if cue.get("noCaption") else {})})
             placed.append((cursor, samples))
             cursor += dur + cue.get("gapAfter", v["cueGap"])
         voice_len = (cursor - v["cueGap"] + scene.get("tail", v["sceneTail"]) - start) if cues else 0

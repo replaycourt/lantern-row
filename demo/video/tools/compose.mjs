@@ -2,13 +2,14 @@
 // Composes the frames of the demo video: the recorded take, cut as timeline.json says, with captions,
 // the hand, the live badge and the end card drawn over it by compositor.html in headless Chrome.
 //
-//   node demo/video/tools/compose.mjs --work <dir> [--stills 3,40,70] [--port 9420]
+//   node demo/video/tools/compose.mjs --work <dir> [--stills 3,40,70] [--from <sec>] [--port 9420]
 //
 // Reads <work>/timeline.json (from voice.py, which also names the takes) and ../storyboard.json,
 // opens compositor.html, calls setup() once and seek(t) for every frame. A frame whose state did not
 // change is not captured again; identical images are stored once. Output:
 //   <work>/frames/*.png and <work>/frames/manifest.txt (one image path per video frame)
-// With --stills it only writes <work>/stills/t<sec>.png for the given times (a quick look).
+// With --stills it only writes <work>/stills/t<sec>.png for the given times (a quick look). With
+// --from it recomposes only the frames from that second on and keeps the earlier ones of the last run.
 // Needs Node 22+ and Google Chrome; no npm packages.
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -24,6 +25,7 @@ const arg = (name, dflt) => {
 const WORK = resolve(arg('work', 'work'))
 const PORT = Number(arg('port', 9420))
 const STILLS = arg('stills', null)
+const FROM = Number(arg('from', 0))
 
 const storyboard = JSON.parse(readFileSync(join(HERE, '..', 'storyboard.json'), 'utf8'))
 const timeline = JSON.parse(readFileSync(join(WORK, 'timeline.json'), 'utf8'))
@@ -65,15 +67,16 @@ try {
     const fps = timeline.fps
     const total = timeline.frames
     const dir = join(WORK, 'frames')
-    rmSync(dir, { recursive: true, force: true })
+    const first = Math.round(FROM * fps)
+    const manifest = first > 0 ? readFileSync(join(dir, 'manifest.txt'), 'utf8').split('\n').filter(Boolean).slice(0, first) : []
+    if (first === 0) rmSync(dir, { recursive: true, force: true })
     mkdirSync(dir, { recursive: true })
-    const manifest = []
     const byHash = new Map()
     let prevSig = null
     let prevFile = null
     let captured = 0
     const t0 = Date.now()
-    for (let i = 0; i < total; i++) {
+    for (let i = manifest.length; i < total; i++) {
       const sig = await page.eval(`seek(${i / fps})`)
       if (sig !== prevSig || prevFile === null) {
         await nextPaint()
