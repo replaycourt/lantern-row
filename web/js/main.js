@@ -37,6 +37,8 @@ const S = {
   lastCall: null, // the call of the night that just ended, waiting to be judged
   skipGood: null, // {good, night}: a good the player chose to wait on until the Dock gets cheap
   summaryTimer: null,
+  bestOffset: -Infinity, // chain clock minus browser clock, the largest seen: a smaller one means a stale view
+  lastStale: 0,
 }
 
 const client = new Client()
@@ -276,7 +278,7 @@ async function poll() {
       const spotNow = scene.stallById.get(S.stall?.id)?.spot
       if (spotBefore !== spotNow) scene.focusStall(S.stall.id)
     }
-    if (world.due && !S.advancing && Date.now() - S.lastAdvanceTry > 4000) advance()
+    if (isDue(world) && !S.advancing && Date.now() - S.lastAdvanceTry > 4000) advance()
     pollCount++
     if (!queue.busy && pollCount % 2 === 0) await refreshMe()
     if (pollCount % 6 === 1) await refreshBoard()
@@ -290,9 +292,29 @@ async function poll() {
   schedulePoll(document.hidden ? 5000 : S.walking ? 2500 : 1500)
 }
 
+/**
+ * A night is due when the chain says so, or when the browser's clock says the night ended a while
+ * ago and the view still disagrees: an RPC node that fell behind serves a stale world, with a stale
+ * clock and a stale `due`. Then the client moves to the other host; an early advance_night is harmless.
+ */
+function isDue(world) {
+  if (world.due) return true
+  const overdue = Date.now() + S.bestOffset - world.ends_ms
+  if (overdue > 25000) {
+    if (Date.now() - S.lastStale > 60000) {
+      S.lastStale = Date.now()
+      console.info('stale view', Math.round(overdue / 1000), 's overdue; switching host')
+      client.rpc.active = (client.rpc.active + 1) % client.rpc.hosts.length
+    }
+    return true
+  }
+  return false
+}
+
 function applyWorld(world) {
   S.world = world
   S.clockOffset = world.now_ms - Date.now()
+  if (S.clockOffset > S.bestOffset) S.bestOffset = S.clockOffset
   if (S.started && S.stall) {
     S.fc = L.forecast(world, S.cfg, S.stall)
     U.renderNight(world)
@@ -302,7 +324,7 @@ function applyWorld(world) {
 
 function tickClock() {
   if (!S.world) return
-  const now = Date.now() + S.clockOffset
+  const now = Date.now() + Math.max(S.clockOffset, S.bestOffset - 5000)
   const left = S.world.ends_ms - now
   U.renderClock(Math.max(0, left) / S.cfg.night_ms, { walking: S.walking })
 }
@@ -314,7 +336,7 @@ async function advance() {
     // A small, account-specific delay so two open tabs rarely race; a race is harmless anyway.
     await new Promise((r) => setTimeout(r, (parseInt(S.identity.account.slice(0, 4), 16) % 1400) + 100))
     const fresh = await client.world()
-    if (!fresh.due) return
+    if (!isDue(fresh)) return
     const out = await client.advanceNight()
     const text = L.catchUpText(out?.advanced ?? 1, out?.slept ?? 0)
     if (text) U.toast(text, 'warn', 7000)
@@ -439,11 +461,16 @@ function answerCall(yes) {
   c.accepted = yes
   if (yes) {
     if (c.call.accept.skip != null) S.skipGood = { good: c.call.accept.skip, night: c.night }
-    if (c.call.accept.actions.length) {
-      push(...c.call.accept.actions)
+    // the counter may have filled since the call was made: buy only what still fits
+    const room = S.stall.capacity - S.stall.stock.reduce((a, b) => a + b, 0)
+    const actions = c.call.accept.actions
+      .map((a) => (a.buy && a.buy.qty > room ? (room > 0 ? { buy: { ...a.buy, qty: room } } : null) : a))
+      .filter(Boolean)
+    if (actions.length) {
+      push(...actions)
       queue.flush()
-      S.progress.restocked = S.progress.restocked || c.call.accept.actions.some((a) => a.buy)
-      S.progress.priced = S.progress.priced || c.call.accept.actions.some((a) => a.price)
+      S.progress.restocked = S.progress.restocked || actions.some((a) => a.buy)
+      S.progress.priced = S.progress.priced || actions.some((a) => a.price)
     }
     U.toast(`${c.call.accept.label}. The night report will say how it went.`, 'ok')
   }
