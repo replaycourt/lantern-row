@@ -35,10 +35,12 @@ const lerp = (a, b, t) => a + (b - a) * t
 const easeOut = (t) => 1 - Math.pow(1 - t, 3)
 
 export class Scene {
-  constructor(canvas, { reducedMotion = false } = {}) {
+  constructor(canvas, { reducedMotion = false, fit = null } = {}) {
     this.canvas = canvas
     this.ctx = canvas.getContext('2d')
     this.reduced = reducedMotion
+    this.fit = fit // world units of height to show, for a small picture such as the deed card
+    this.zoom = 1 // watching the row comes in closer
     this.W = 0
     this.H = 0
     this.dpr = 1
@@ -63,6 +65,9 @@ export class Scene {
     this.nextFirework = 0
     this.nextLightning = 4
     this.title = false
+    this.follow = false // watching the row: the camera follows a shopper
+    this.lead = null
+    this.followPause = 0
     this.walk = null
     this.onCoin = null
     this.onBubble = null
@@ -90,6 +95,8 @@ export class Scene {
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
     this.cam.scale = this.W < 720 ? 0.78 : clamp(this.W / 1500, 0.6, 1.15)
     if (this.H < 560) this.cam.scale = Math.min(this.cam.scale, this.H / 640)
+    this.cam.scale *= this.zoom
+    if (this.fit) this.cam.scale = this.H / this.fit
   }
 
   setInsets({ top = 0, bottom = 0 }) {
@@ -195,6 +202,7 @@ export class Scene {
     const c = this.canvas
     c.addEventListener('pointerdown', (e) => {
       this.drag = { x: e.clientX, camX: this.cam.x, moved: false, id: e.pointerId }
+      this.followPause = this.t + 8
       c.setPointerCapture?.(e.pointerId)
     })
     c.addEventListener('pointermove', (e) => {
@@ -223,7 +231,7 @@ export class Scene {
   // ---- the walk ---------------------------------------------------------------------------------
 
   /** Plays a night log. Resolves when the last villager has left. */
-  playNight(log, { duration = 11 } = {}) {
+  playNight(log, { duration = 11, reasonFor = null } = {}) {
     // a walk still playing is cut short, never left hanging
     if (this.walk) {
       const old = this.walk
@@ -282,8 +290,9 @@ export class Scene {
         const d = Math.abs(tx - px) / speed
         actor.steps.push({ kind: 'walk', from: px, to: tx, t0: t, t1: t + d })
         t += d
-        actor.steps.push({ kind: st.kind, stall: st.stall, good: st.good, price: st.price, t0: t, t1: t + 1.0, text: bubbleText(st.kind, st.good, rand), fired: false })
-        t += 1.0
+        const sub = st.kind === 'refuse' ? (reasonFor?.(sc.villager, st.stall, st.good) ?? null) : null
+        actor.steps.push({ kind: st.kind, stall: st.stall, good: st.good, price: st.price, t0: t, t1: t + (sub ? 1.4 : 1.0), text: bubbleText(st.kind, st.good, rand), sub, fired: false })
+        t += sub ? 1.4 : 1.0
         px = tx
       }
       if (sc.missed.length) {
@@ -303,6 +312,45 @@ export class Scene {
     })
     this.walk = { t: 0, end: end + 0.3, log }
     return new Promise((resolve) => (this.walk.resolve = resolve))
+  }
+
+  /** Ends a walk that is playing, at once; its promise resolves. */
+  stopWalk() {
+    const w = this.walk
+    this.walk = null
+    this.actors = []
+    this.lead = null
+    w?.resolve?.()
+  }
+
+  /**
+   * Watching the row: the camera follows one shopper from stall to stall, the one nearest the
+   * camera that still has stops ahead, and picks the next when they leave. A drag pauses it.
+   */
+  followShopper() {
+    const w = this.walk
+    if (!w) return false
+    const stopsLeft = (a) => a.steps.filter((s) => s.kind !== 'walk' && s.t1 > w.t).length
+    const leaving = (a) => a.steps.some((s) => s.leaving && w.t >= s.t0)
+    const ok = (a) => a && a.visible && !leaving(a) && stopsLeft(a) > 0
+    if (!ok(this.lead)) {
+      let best = null
+      for (const a of this.actors) {
+        if (!ok(a)) continue
+        const d = Math.abs(a.x - this.cam.x)
+        if (!best || d < best.d) best = { a, d }
+      }
+      this.lead = best?.a ?? null
+    }
+    const a = this.lead
+    if (!a) return false
+    // look ahead to the stall they are walking to, as far as keeps them in the picture
+    const step = a.steps.find((s) => s.t1 > w.t && s.kind !== 'walk')
+    const stop = step?.stall != null ? this.stallById.get(step.stall) : null
+    const half = this.W / 2 / this.cam.scale
+    const ahead = stop ? clamp((stop.spot * SPOT_W - a.x) / 2, -half * 0.55, half * 0.55) : 70 * a.dir
+    this.cam.target = a.x + ahead
+    return true
   }
 
   stepWalk(dt) {
@@ -331,7 +379,7 @@ export class Scene {
         a.dir = 1
         if (!cur.fired) {
           cur.fired = true
-          a.bubble = { text: cur.text, kind: cur.kind, until: cur.t1 + 0.2 }
+          a.bubble = { text: cur.text, sub: cur.sub ?? null, kind: cur.kind, until: cur.t1 + 0.2 }
           if (cur.kind === 'buy') this.spawnCoin(a, cur.stall, cur.price)
           this.onBubble?.(cur, a)
         }
@@ -429,7 +477,8 @@ export class Scene {
 
   update(dt) {
     this.t += dt
-    if (this.title && !this.drag) this.cam.target += dt * 18
+    const following = this.follow && !this.drag && this.t > this.followPause && this.followShopper()
+    if (this.title && !this.drag && !following) this.cam.target += dt * 18
     if (!this.drag) this.cam.x = lerp(this.cam.x, this.cam.target, Math.min(1, dt * 4))
     this.stepWalk(dt)
     this.stepStrollers(dt)
@@ -516,8 +565,8 @@ export class Scene {
     for (const a of this.strollers) this.drawVillager(a)
     for (const a of this.actors) if (a.visible) this.drawVillager(a)
     this.drawCoins()
-    this.drawBubbles(this.actors.filter((a) => a.visible && a.bubble && (!this.walk || this.walk.t < a.bubble.until)))
     this.drawFloats()
+    this.drawBubbles(this.actors.filter((a) => a.visible && a.bubble && (!this.walk || this.walk.t < a.bubble.until)))
     this.drawSparks()
     if (this.event.kind === 'storm') this.drawRain()
     this.drawVignette()
@@ -1233,21 +1282,26 @@ export class Scene {
     const { ctx } = this
     const k = this.cam.scale
     const fs = Math.max(11, 12.5 * k)
-    ctx.font = `bold ${fs}px ${FONT}`
-    const ph = fs + 12
+    const ss = Math.max(10, 11 * k)
     const placed = []
     const items = actors
       .map((a) => {
-        const pw = ctx.measureText(a.bubble.text).width + 16
+        ctx.font = `bold ${fs}px ${FONT}`
+        let pw = ctx.measureText(a.bubble.text).width + 16
+        if (a.bubble.sub) {
+          ctx.font = `600 ${ss}px ${FONT}`
+          pw = Math.max(pw, ctx.measureText(a.bubble.sub).width + 16)
+        }
         const ax = this.sx(a.x)
-        return { a, pw, ax, x: clamp(ax, pw / 2 + 6, this.W - pw / 2 - 6), y: this.sy(a.y) - 56 * k }
+        return { a, pw, ph: fs + 12 + (a.bubble.sub ? ss + 3 : 0), ax, x: clamp(ax, pw / 2 + 6, this.W - pw / 2 - 6), y: this.sy(a.y) - 56 * k }
       })
       .filter((b) => b.ax > -80 && b.ax < this.W + 80)
       .sort((p, q) => p.ax - q.ax)
     for (const b of items) {
       // lift the bubble while it overlaps one already placed
       let guard = 0
-      while (guard++ < 8 && placed.some((o) => Math.abs(o.x - b.x) < (o.pw + b.pw) / 2 + 4 && Math.abs(o.y - b.y) < ph + 3)) b.y -= ph + 4
+      const hit = () => placed.find((o) => Math.abs(o.x - b.x) < (o.pw + b.pw) / 2 + 4 && b.y > o.y - o.ph - 3 && b.y - b.ph < o.y + 3)
+      for (let o = hit(); o && guard++ < 8; o = hit()) b.y = o.y - o.ph - 4
       placed.push(b)
       const tailX = clamp(b.ax, b.x - b.pw / 2 + 10, b.x + b.pw / 2 - 10)
       const base = this.sy(b.a.y) - 56 * k
@@ -1262,6 +1316,7 @@ export class Scene {
         ctx.lineTo(tailX, base + 4)
         ctx.stroke()
       }
+      const ph = b.ph
       roundRect(ctx, b.x - b.pw / 2, b.y - ph, b.pw, ph, 8)
       ctx.fill()
       ctx.beginPath()
@@ -1272,7 +1327,13 @@ export class Scene {
       ctx.fill()
       ctx.fillStyle = '#2a1d2e'
       ctx.textAlign = 'center'
-      ctx.fillText(b.a.bubble.text, b.x, b.y - ph / 2 + fs * 0.36)
+      ctx.font = `bold ${fs}px ${FONT}`
+      if (b.a.bubble.sub) {
+        ctx.fillText(b.a.bubble.text, b.x, b.y - ph + 6 + fs * 0.86)
+        ctx.font = `600 ${ss}px ${FONT}`
+        ctx.fillStyle = '#8a2a2e'
+        ctx.fillText(b.a.bubble.sub, b.x, b.y - 7)
+      } else ctx.fillText(b.a.bubble.text, b.x, b.y - ph / 2 + fs * 0.36)
     }
   }
 
