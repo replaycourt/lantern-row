@@ -97,6 +97,7 @@ async function boot() {
     const returning = S.me.stalls?.length > 0
     U.$('name-row').classList.toggle('hidden', returning)
     U.$('start').textContent = returning ? `Back to ${S.me.stalls[0].name}` : 'Open your stall'
+    U.$('watch-play').textContent = returning ? 'Back to your stall' : 'Open your stall'
     if (!returning) U.$('stall-name').value = L.randomStallName()
     U.$('title-actions').classList.remove('hidden')
     S.goals = L.milestones(cfg)
