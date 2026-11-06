@@ -19,7 +19,7 @@
 
 <sub>Screenshots of the page against the live testnet contract, taken with headless Chrome and no transaction; the two in-game shots show an existing player's stall, opened read-only.</sub>
 
-**Run a stall, price your goods, out-trade the merchants.** A night market that never closes: a shared, lantern-lit street where twelve villagers with their own wallets, tastes and memories walk the row every 20 seconds and buy what they need. Every night brings one call to make: stock up before the festival, wait for the Dock to get cheap, undercut The Quiet Kettle on what everyone wants tonight. Grow your stall, and sell it whole when you are done. Built at NEAR HACKATHON for the `games` and `nfts` tracks.
+**Run a stall, price your goods, out-trade the merchants.** A night market nobody can close: a shared, lantern-lit street where twelve villagers with their own wallets, tastes and memories walk the row every 20 seconds and buy what they need. Every night brings one call to make: stock up before the festival, wait for the Dock to get cheap, undercut The Quiet Kettle on what everyone wants tonight. Grow your stall, and sell it whole when you are done. Built at NEAR HACKATHON for the `games` and `nfts` tracks.
 
 **No server, no owner, no admin key.** The whole game is one NEAR contract, and that contract account holds no access keys at all: nobody, its author included, can redeploy it, change a rule, mint coin or take anyone's stall. The page is static files, and every move is signed in your browser and checked by the contract. One million coin existed at founding, and `audit()` still counts exactly one million.
 
@@ -27,7 +27,7 @@
 
 **Demo video (two minutes of real play on testnet):** [web/media/lantern-row-demo.mp4](web/media/lantern-row-demo.mp4), captions in [demo/video/lantern-row-demo.srt](demo/video/lantern-row-demo.srt). How it was made: [demo/video/README.md](demo/video/README.md).
 
-**Judging?** [JUDGE.md](JUDGE.md) is a five-minute path: what to tap, what you should see, the one-command checks, and where each claim lives in the code.
+**Judging?** [JUDGE.md](JUDGE.md) is a five-minute path: what to tap, what you should see, the one-command checks, and where each claim lives in the code. `scripts/judge-checks.sh` runs the five checks at once and prints PASS or FAIL.
 
 **Check it without an account.** Plain curl against the public testnet RPC; python3 only decodes the view result, which the RPC returns as bytes.
 
