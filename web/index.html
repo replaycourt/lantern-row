@@ -27,6 +27,7 @@
 <section id="title" class="screen">
   <canvas id="logo" width="520" height="190" aria-label="Lantern Row" role="img"></canvas>
   <p id="title-line" class="title-line">Loading the street…</p>
+  <p id="title-idle" class="title-idle hidden"></p>
   <div id="title-actions" class="title-actions hidden">
     <div id="name-row" class="name-row">
       <label for="stall-name" class="sr-only">Name your stall</label>
@@ -34,17 +35,37 @@
       <button id="shuffle-name" class="ghost" type="button" title="Another name">⟳</button>
     </div>
     <button id="start" class="big primary" type="button">Open your stall</button>
+    <ol class="steps" aria-label="How to play">
+      <li><b>1</b><span>Open a stall<small>3,000 coin, no wallet</small></span></li>
+      <li><b>2</b><span>Stock and price<small>villagers buy every 20 s</small></span></li>
+      <li><b>3</b><span>Make tonight’s call<small>one decision a night</small></span></li>
+    </ol>
     <p class="fine">No sign-up. Two minutes to learn. Play money on a shared street.</p>
+    <button id="watch" class="link-btn" type="button">Watch the row first <span aria-hidden="true">→</span></button>
   </div>
   <p id="title-error" class="title-error hidden"></p>
 </section>
+
+<header id="watchbar" class="watchbar hidden">
+  <div class="watch-info"><b>Watching the row</b><span id="watch-line">Replaying the latest nights from the chain</span></div>
+  <div class="watch-actions">
+    <button class="icon-btn" id="watch-proof" type="button" title="On-chain proof" aria-label="On-chain proof"><span class="ico ico-proof"></span><span class="icon-label">Proof</span></button>
+    <button class="small primary" id="watch-play" type="button">Open your stall</button>
+  </div>
+</header>
+
+<div id="ticker" class="ticker hidden">
+  <span class="ticker-tag" id="ticker-tag">Night log</span>
+  <div class="ticker-track"><div class="ticker-move" id="ticker-move"></div></div>
+</div>
 
 <header id="hud" class="hidden">
   <div class="hud-left">
     <div class="chip stall-chip" id="stall-chip">
       <span class="stall-sign" id="hud-name">Your stall</span>
       <span class="money"><span class="coin-icon" aria-hidden="true"></span><b id="hud-money">0</b></span>
-      <span class="sub" id="hud-worth">worth 0</span>
+      <span class="goal" id="hud-goal"><span class="goal-bar" aria-hidden="true"><i id="goal-fill"></i></span><span class="goal-text">worth <b id="goal-text">0</b></span></span>
+      <span class="sub" id="hud-worth"></span>
     </div>
   </div>
   <div class="hud-center">

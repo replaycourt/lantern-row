@@ -8,7 +8,7 @@ import * as L from './logic.js'
 import * as U from './ui.js'
 
 const EXPLORER = 'https://testnet.nearblocks.io'
-const CODE_HASH = '1be4c4d2b9f97af91ebb94d32817c8d572f7064a2d5aafe730c8ab1d7d2b4e9b'
+const CODE_HASH = L.WASM_SHA256
 const reduced = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
 const S = {
@@ -18,8 +18,10 @@ const S = {
   me: null,
   stall: null,
   prevStall: null,
-  board: [],
-  rank: null,
+  board: [], // the raw leaderboard: every stall, on the row or not
+  standing: null, // {place, of, ahead, merchant}: the stall's place among the players
+  goals: [], // worth milestones, from the contract's own numbers
+  goalReached: null, // the highest milestone this stall has passed (worth)
   identity: null,
   walking: false,
   advancing: false,
@@ -40,6 +42,11 @@ const S = {
   bestOffset: -Infinity, // chain clock minus browser clock, the largest seen: a smaller one means a stale view
   lastStale: 0,
 }
+
+// Watching the row: the title street replays the latest nights from the chain's own night logs.
+// Read-only: views only, never a transaction, never advance_night.
+const W = { on: false, token: 0, logs: new Map(), cycle: [], next: 0, pollTimer: null, watching: false }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const client = new Client()
 const sound = new Sound()
@@ -92,6 +99,9 @@ async function boot() {
     U.$('start').textContent = returning ? `Back to ${S.me.stalls[0].name}` : 'Open your stall'
     if (!returning) U.$('stall-name').value = L.randomStallName()
     U.$('title-actions').classList.remove('hidden')
+    S.goals = L.milestones(cfg)
+    U.setIdle(L.idleNotice(world, cfg))
+    startReplay()
   } catch (e) {
     console.error(e)
     U.$('title-line').textContent = 'The street is out of reach right now.'
@@ -120,6 +130,9 @@ function wireButtons() {
   U.$('btn-board').addEventListener('click', openBoard)
   U.$('btn-deed').addEventListener('click', openDeed)
   U.$('btn-proof').addEventListener('click', openProof)
+  U.$('watch').addEventListener('click', () => setWatching(true))
+  U.$('watch-play').addEventListener('click', () => setWatching(false))
+  U.$('watch-proof').addEventListener('click', openProof)
   U.$('btn-sound').addEventListener('click', () => {
     sound.enable()
     sound.setMuted(!sound.muted)
@@ -231,7 +244,10 @@ async function enterGame() {
   } catch {
     /* the poll loop will catch up */
   }
+  stopReplay()
+  scene.zoom = 1
   U.$('title').classList.add('hidden')
+  U.$('watchbar').classList.add('hidden')
   U.$('hud').classList.remove('hidden')
   U.$('panel').classList.remove('hidden')
   scene.setTitle(false)
@@ -239,7 +255,9 @@ async function enterGame() {
   scene.setWorld(S.world, S.cfg)
   scene.focusStall(S.stall.id, { instant: false })
   layout()
-  U.buildGoods(S.cfg, { onPrice, onCard: (g) => U.toast(`${S.cfg.goods[g].name}: fair price ${S.cfg.goods[g].fair}, spoils ${S.cfg.goods[g].spoil_pct}% a night, wanted every ${S.cfg.goods[g].need_period} night${S.cfg.goods[g].need_period === 1 ? '' : 's'}.`) })
+  U.buildGoods(S.cfg, { onPrice, onCard })
+  S.goals = L.milestones(S.cfg)
+  S.goalReached = loadGoal(S.stall)
   queue = new ActionQueue(client, { onFlush, onError, onPending })
   S.shownNight = S.world.night
   S.progress.rivalName = S.world.row.find((s) => s.npc && s.spot != null)?.name ?? 'The Quiet Kettle'
@@ -369,13 +387,22 @@ async function refreshMe() {
 
 async function refreshBoard() {
   try {
-    const board = L.visibleBoard(await client.leaderboard(60), S.stall.id)
-    S.board = board
-    S.rank = L.rankOf(board, S.stall.id)
-    renderHud()
+    setBoard(await client.leaderboard(120))
   } catch {
     /* next time */
   }
+}
+
+function setBoard(board) {
+  const before = S.standing
+  S.board = board
+  S.standing = L.standing(board, S.stall.id)
+  const passed = L.passedText(before, S.standing)
+  if (passed) {
+    U.toast(passed, 'ok', 5000)
+    sound.fanfare()
+  }
+  renderHud()
 }
 
 // ---- nights -------------------------------------------------------------------------------------
@@ -418,7 +445,7 @@ async function onNightChanged(world, nights = 1) {
   U.setStatus('busy', 'The villagers are walking the row…')
   U.hideHint()
   renderGoods()
-  await scene.playNight(log, { duration: reduced ? 4 : 9 })
+  await scene.playNight(log, { duration: reduced ? 4 : 9, reasonFor: reasonsFor(log, S.world) })
   S.walking = false
   await refreshMeNow()
   const summary = L.summariseNight({ log, stall: S.stall, before: S.prevStall, world: S.world, cfg: S.cfg, villagers: S.world.villagers, nights })
@@ -659,6 +686,7 @@ async function openDeed() {
   }
   const freeSpots = freeSpotsAhead()
   const body = U.openSheet('Your stall', U.deedHtml({ stall: S.stall, token, cfg: S.cfg, account: S.identity.account, royaltyPct: S.cfg.royalty_pct, freeSpots }))
+  drawDeedScene(body.querySelector('#deed-scene'), S.stall)
   body.querySelector('[data-upgrade]')?.addEventListener('click', () => {
     push({ upgrade: { stall: S.stall.id, max_cost: S.cfg.tier_cost[S.stall.tier + 1] } })
     U.closeSheet()
@@ -711,10 +739,8 @@ async function openBoard() {
   sound.tap()
   U.openSheet('Leaderboard', '<p class="muted">Fetching the ranks…</p>')
   try {
-    const board = L.visibleBoard(await client.leaderboard(60), S.stall.id)
-    S.board = board
-    S.rank = L.rankOf(board, S.stall.id)
-    renderHud()
+    const board = await client.leaderboard(120)
+    setBoard(board)
     U.openSheet('Leaderboard', U.boardHtml(board, S.stall.id))
   } catch {
     U.openSheet('Leaderboard', '<p>The ranks are out of reach right now.</p>')
@@ -725,8 +751,13 @@ function openProof() {
   sound.tap()
   U.openSheet(
     'On-chain proof',
-    U.proofHtml({ contract: CONTRACT, account: S.identity.account, stallId: S.stall?.id, rpcHost: client.rpc.host, gasKey: client.pool.lastKey, txs: client.txs, codeHash: CODE_HASH, explorer: EXPLORER }),
+    U.proofHtml({ contract: CONTRACT, account: S.identity?.account ?? '–', stallId: S.stall?.id, rpcHost: client.rpc.host, gasKey: client.pool.lastKey, txs: client.txs, codeHash: CODE_HASH, explorer: EXPLORER }),
   )
+  // the two claims a judge cares about, read from the chain now, not printed from memory
+  client
+    .contractFacts()
+    .then((f) => U.renderProofFacts(L.proofFacts({ ...f, expected: CODE_HASH })))
+    .catch(() => U.renderProofFacts(L.proofFacts({ keyCount: null, codeHashHex: null })))
 }
 
 function onTapStall(id, e) {
@@ -735,7 +766,7 @@ function onTapStall(id, e) {
   const stall = S.world.row.find((s) => s.id === id)
   if (!stall) return
   sound.tap()
-  const mine = stall.owner === S.identity.account
+  const mine = !!S.identity && stall.owner === S.identity.account
   const canBuy = !mine && stall.listed != null && S.stall && S.stall.earned >= stall.listed
   U.showPeek(stall, S.cfg, {
     x: e.clientX,
@@ -764,7 +795,165 @@ function renderAll() {
 
 function renderHud() {
   if (!S.stall) return
-  U.renderHud({ stall: S.stall, rank: S.rank, total: S.board.length || S.world.row.length })
+  checkMilestones()
+  U.renderHud({ stall: S.stall, goal: L.goalProgress(S.stall.worth, S.goals), standing: S.standing })
+}
+
+// ---- goals --------------------------------------------------------------------------------------
+
+const goalKey = (stall) => `lantern-row:goal:v1:${stall.id}`
+
+/** The highest milestone this stall already passed; on a first visit, whatever its worth already is. */
+function loadGoal(stall) {
+  const stored = Number(globalThis.localStorage?.getItem(goalKey(stall)))
+  if (stored > 0) return stored
+  return [...S.goals].reverse().find((m) => m.at <= stall.worth)?.at ?? 0
+}
+
+function checkMilestones() {
+  if (S.goalReached == null || S.stall?.worth == null) return
+  const passed = L.crossedMilestones(S.goalReached, S.stall.worth, S.goals)
+  if (!passed.length) return
+  const m = passed[passed.length - 1]
+  S.goalReached = m.at
+  globalThis.localStorage?.setItem(goalKey(S.stall), String(m.at))
+  U.toast(L.milestoneText(m, S.cfg), 'ok', 6000)
+  sound.fanfare()
+  scene.celebrate((S.stall.spot ?? 0) * 210)
+}
+
+function onCard(g) {
+  const card = U.$('goods').children[g]
+  const good = S.cfg.goods[g]
+  U.toast(`${card?.dataset.full ?? good.name} Fair price ${good.fair}; spoils ${good.spoil_pct}% a night.`, '', 6000)
+}
+
+// ---- watching the row ---------------------------------------------------------------------------
+
+/** "Too dear!" gets a reason in a few words, worked out the way the contract decides. */
+function reasonsFor(log, world) {
+  return (villager, stall, good) => L.refusalWords(L.refusalReason({ log, world, cfg: S.cfg, villager, stall, good }))
+}
+
+function startReplay() {
+  if (W.on) return
+  W.on = true
+  const token = ++W.token
+  scene.follow = true
+  if (S.world?.last) W.logs.set(S.world.last.night, S.world.last)
+  W.cycle = [...W.logs.keys()].sort((a, b) => a - b)
+  W.next = W.cycle.length - 1 // the latest night first
+  renderTicker()
+  loadOlderLogs(token)
+  schedulePollTitle()
+  ;(async () => {
+    while (W.on && W.token === token) {
+      const night = W.cycle[W.next % Math.max(1, W.cycle.length)]
+      const log = W.logs.get(night)
+      W.next = (W.next + 1) % Math.max(1, W.cycle.length)
+      if (!log) {
+        await sleep(2000)
+        continue
+      }
+      U.$('watch-line').textContent = `Replaying night ${L.fmt(log.night)} from the chain · tap a stall to see its prices`
+      await scene.playNight(log, { duration: reduced ? 6 : 16, reasonFor: reasonsFor(log, S.world) })
+      if (!W.on || W.token !== token) break
+      await sleep(1200)
+    }
+  })()
+}
+
+/** The contract keeps the last six night logs; fetch the ones before the latest for the replay. */
+async function loadOlderLogs(token) {
+  const latest = S.world?.last?.night
+  if (latest == null) return
+  for (let n = latest - 1; n > latest - (S.cfg.log_keep ?? 6) && n >= 0; n--) {
+    if (W.token !== token) return
+    if (W.logs.has(n)) continue
+    try {
+      const log = await client.nightLog(n)
+      if (log?.night === n) W.logs.set(n, log)
+    } catch {
+      break
+    }
+  }
+  if (W.token !== token) return
+  W.cycle = [...W.logs.keys()].sort((a, b) => a - b)
+  renderTicker()
+}
+
+function renderTicker() {
+  const nights = [...W.logs.values()]
+    .sort((a, b) => b.night - a.night)
+    .map((log) => ({ tally: L.nightTally(log), items: L.tickerItems(log, { world: S.world, cfg: S.cfg }) }))
+  U.renderTicker(nights, { reduced })
+}
+
+/** While nobody plays, the title still follows the chain: a night someone else closed shows up here. */
+function schedulePollTitle() {
+  clearTimeout(W.pollTimer)
+  W.pollTimer = setTimeout(pollTitle, 15000)
+}
+
+async function pollTitle() {
+  if (!W.on) return
+  try {
+    const world = await client.world()
+    if (world.night !== S.world.night) {
+      applyWorld(world)
+      scene.setWorld(world, S.cfg)
+      U.$('title-line').textContent = L.titleLine(world, S.cfg)
+      if (world.last) W.logs.set(world.last.night, world.last)
+      for (const n of [...W.logs.keys()].sort((a, b) => a - b).slice(0, -(S.cfg.log_keep ?? 6))) W.logs.delete(n)
+      W.cycle = [...W.logs.keys()].sort((a, b) => a - b)
+      W.next = W.cycle.length - 1
+      renderTicker()
+    } else applyWorld(world)
+    U.setIdle(L.idleNotice(world, S.cfg))
+  } catch {
+    /* try again later */
+  }
+  schedulePollTitle()
+}
+
+function stopReplay() {
+  W.on = false
+  W.token++
+  clearTimeout(W.pollTimer)
+  scene.follow = false
+  scene.stopWalk()
+  U.$('ticker').classList.add('hidden')
+}
+
+/** "Watch the row": the title steps aside so the whole street shows; stalls can be tapped. */
+function setWatching(on) {
+  W.watching = on
+  U.$('title').classList.toggle('hidden', on)
+  U.$('watchbar').classList.toggle('hidden', !on)
+  U.hidePeek()
+  scene.zoom = on ? (window.innerWidth < 720 ? 1.4 : 1.3) : 1
+  scene.resize()
+  if (on) {
+    sound.tap()
+    U.toast('Tap any stall to see its prices and why. Drag to look along the row.', '', 5000)
+  } else {
+    U.$('stall-name').focus?.()
+  }
+}
+
+/** The deed card's picture: the stall on the row at night, drawn by the same scene as the street. */
+function drawDeedScene(canvas, stall) {
+  if (!canvas) return
+  try {
+    const mini = new Scene(canvas, { reducedMotion: true, fit: 240 })
+    const view = { ...stall, spot: stall.spot ?? 23 }
+    mini.setWorld({ row: [view], villagers: [], event: S.world.event, listings: stall.listed != null ? [[stall.id, stall.listed]] : [] }, S.cfg)
+    mini.focusStall(stall.id, { instant: true })
+    mini.update(0)
+    mini.draw()
+  } catch (e) {
+    console.info('deed picture', e?.message)
+  }
 }
 
 function renderGoods() {

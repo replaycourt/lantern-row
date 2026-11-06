@@ -1,6 +1,6 @@
 // DOM side of the client: the HUD, the goods counter, hints, the night summary, sheets, toasts.
 // Everything that comes from the chain goes through escapeHtml before it touches innerHTML.
-import { GOOD_SHORT, escapeHtml as esc, fmt, shortAccount, eventInfo, bannerText, cheapestRival, expectSales, spotLabel } from './logic.js'
+import { GOOD_SHORT, escapeHtml as esc, fmt, shortAccount, eventInfo, bannerText, spotLabel, priceNote, rankGroups, standingText } from './logic.js'
 
 export const $ = (id) => document.getElementById(id)
 
@@ -36,9 +36,10 @@ export function buildGoods(cfg, { onPrice, onCard }) {
       <div class="stock"><b data-stock>0</b> in stock<span class="want" data-want></span></div>
       <div class="price-row">
         <button class="dec" type="button" aria-label="Lower the price of ${esc(good.name)}">−</button>
-        <div class="price" data-price><span data-p>–</span><small data-hint></small></div>
+        <div class="price" data-price><span data-p>–</span><small class="why-short"></small></div>
         <button class="inc" type="button" aria-label="Raise the price of ${esc(good.name)}">+</button>
-      </div>`
+      </div>
+      <p class="why" data-why></p>`
     el.querySelector('.dec').addEventListener('click', () => onPrice(g, -1))
     el.querySelector('.inc').addEventListener('click', () => onPrice(g, +1))
     el.querySelector('.icon').addEventListener('click', () => onCard?.(g))
@@ -59,17 +60,11 @@ export function renderGoods(stall, { cfg, world, pendingGoods = new Set(), fc = 
     p.classList.toggle('off', price === 0)
     p.classList.toggle('pending', pendingGoods.has(g))
     el.querySelector('[data-p]').textContent = price === 0 ? 'off' : fmt(price)
-    const rival = world ? cheapestRival(world, stall.id, g) : null
-    const hint = el.querySelector('[data-hint]')
-    const parts = []
-    if (rival) parts.push(`rivals ${fmt(rival.price[g])}`)
-    else if (world) parts.push(`dock ${fmt(world.dock[g].price)}`)
     const f = fc?.[g]
-    if (f && price > 0 && stock > 0 && f.wanted > 0) {
-      const n = expectSales(fc, g, price, { stock })
-      parts.push(n >= 0.5 ? `${Math.round(n)} may buy` : 'few buy')
-    }
-    hint.textContent = parts.join(' · ')
+    const note = priceNote({ fc, g, price, stock, world, stallId: stall.id, cfg })
+    el.querySelector('.why').textContent = note.long
+    el.querySelector('.why-short').textContent = note.short
+    el.dataset.full = note.full
     p.title = reasons?.[g] ? `Smart price: ${reasons[g].price}, ${reasons[g].reason}` : ''
     const sold = stall.sold_last?.[g] ?? 0
     el.querySelector('[data-sold]').textContent = sold ? `sold ${sold}` : ''
@@ -97,7 +92,8 @@ export function stampCards(goods) {
 // ---- HUD ----------------------------------------------------------------------------------------
 
 let lastMoney = null
-export function renderHud({ stall, rank, total }) {
+/** `goal` from goalProgress, `standing` from standing(): the climb and the place among players. */
+export function renderHud({ stall, goal, standing }) {
   $('hud-name').textContent = stall.name
   const m = $('hud-money')
   if (lastMoney !== null && stall.money !== lastMoney) {
@@ -108,7 +104,15 @@ export function renderHud({ stall, rank, total }) {
   }
   lastMoney = stall.money
   m.textContent = fmt(stall.money)
-  $('hud-worth').textContent = `worth ${fmt(stall.worth)} · ${rank ? `#${rank} of ${total}` : spotLabel(stall.spot)}`
+  if (goal) {
+    $('goal-text').textContent = goal.text
+    $('goal-fill').style.width = `${Math.round(goal.frac * 100)}%`
+    $('hud-goal').title = goal.next ? `Net worth ${fmt(stall.worth)}. Next milestone ${fmt(goal.next.at)}: ${goal.next.label}.` : `Net worth ${fmt(stall.worth)}.`
+  }
+  const line = $('hud-worth')
+  const st = standingText(standing)
+  if (st) line.innerHTML = `<b>${esc(st.place)}</b><span class="next"> · ${esc(st.next)}</span>`
+  else line.textContent = stall.spot == null ? 'off the row' : spotLabel(stall.spot)
 }
 
 export function renderNight(world) {
@@ -230,32 +234,40 @@ export function sheetOpen() {
 export function deedHtml({ stall, token, cfg, account, royaltyPct, freeSpots }) {
   const goods = stall.stock.reduce((a, b) => a + b, 0)
   const holders = stall.holders?.length ? `<p class="holders">Earlier owners: ${stall.holders.map((h) => `<code>${esc(shortAccount(h))}</code>`).join(', ')}</p>` : '<p class="holders">You are the first owner.</p>'
-  const media = token?.metadata?.media?.startsWith('data:image/svg+xml') ? `<img class="deed-nft" src="${esc(token.metadata.media)}" alt="The stall as the chain draws it" width="200" height="200">` : '<div class="deed-nft deed-nft-empty">picture loading…</div>'
+  const svg = token?.metadata?.media?.startsWith('data:image/svg+xml') ? `<img class="deed-chain-img" src="${esc(token.metadata.media)}" alt="The stall as the contract draws it" width="96" height="96">` : '<div class="deed-chain-img">loading…</div>'
   const upgradeCost = cfg.tier_cost[stall.tier + 1]
   const frozen = stall.listed != null
   const moveButtons = (freeSpots ?? [])
     .slice(0, 3)
     .map((s) => `<button class="small" type="button" data-move="${s.spot}" ${frozen || stall.money < s.fee ? 'disabled' : ''}>Move to ${spotLabel(s.spot)} <small>· ${fmt(s.fee)}</small></button>`)
     .join('')
+  const shelf = cfg.goods
+    .map((good, g) => `<span class="deed-good${stall.stock[g] ? '' : ' none'}" title="${esc(good.name)}">${ICONS[g]}<b>${fmt(stall.stock[g])}</b></span>`)
+    .join('')
+  const place = stall.spot == null ? 'off the row' : `spot ${stall.spot} of 0–23 · ${stall.footfall ?? 0}% walk by`
   return `
-    <div class="deed">
-      <div class="deed-title">${esc(stall.name)}</div>
-      <p class="deed-sub">Stall No. ${stall.id} on Lantern Row · ${stall.spot == null ? 'off the row' : `spot ${stall.spot} of 0–23`} · size ${stall.tier + 1}${frozen ? ' · <span class="listed-tag">FOR SALE</span>' : ''}</p>
-      <div class="deed-art">
-        <div class="deed-pic">${media}<small>the token’s own picture, drawn by the contract</small></div>
-        <div class="deed-stats">
-          <div><span>coin inside</span><b>${fmt(stall.money)}</b></div>
-          <div><span>goods inside</span><b>${fmt(goods)}</b></div>
-          <div><span>reputation</span><b>${fmt(stall.rep / 10)}/100</b></div>
-          <div><span>net worth</span><b>${fmt(stall.worth)}</b></div>
-          <div><span>customers served</span><b>${fmt(stall.customers)}</b></div>
-          <div><span>walk-by</span><b>${stall.footfall ?? 0}%</b></div>
-        </div>
+    <div class="deed-card${frozen ? ' for-sale' : ''}">
+      <div class="deed-scene-wrap"><canvas class="deed-scene" id="deed-scene" aria-label="${esc(stall.name)} on the row at night" role="img"></canvas>
+        ${frozen ? `<div class="deed-ribbon">FOR SALE · ${fmt(stall.listed)}</div>` : ''}
       </div>
-      <p class="muted">Owner <code>${esc(shortAccount(stall.owner))}</code>${stall.owner === account ? ' (you)' : ''}. Founder <code>${esc(shortAccount(stall.founder))}</code> earns ${royaltyPct}% of every resale.</p>
-      ${holders}
+      <div class="deed-body">
+        <div class="deed-kicker">Stall deed · No. ${stall.id} · Lantern Row</div>
+        <div class="deed-title">${esc(stall.name)}</div>
+        <p class="deed-sub">${place} · size ${stall.tier + 1}</p>
+        <div class="deed-stats">
+          <div><b>${fmt(stall.money)}</b><span>coin inside</span></div>
+          <div><b>${fmt(goods)}</b><span>goods inside</span></div>
+          <div><b>${fmt(stall.rep / 10)}</b><span>reputation /100</span></div>
+          <div><b>${fmt(stall.worth)}</b><span>net worth</span></div>
+        </div>
+        <div class="deed-shelf">${shelf}</div>
+        <p class="deed-royalty">Founder <code>${esc(shortAccount(stall.founder))}</code> earns <b>${royaltyPct}%</b> of every resale${stall.customers ? ` · ${fmt(stall.customers)} villagers served` : ''}</p>
+      </div>
       <div class="stamp-seal">LANTERN<br>ROW</div>
     </div>
+    <figure class="deed-chain">${svg}<figcaption><b>The image the contract draws.</b> <code>nft_token</code> computes it from the live stall: one lantern per size, brighter with reputation. The card above is the same stall, drawn by this page.</figcaption></figure>
+    <p class="muted">Owner <code>${esc(shortAccount(stall.owner))}</code>${stall.owner === account ? ' (you)' : ''}.</p>
+    ${holders}
 
     <h3>Grow</h3>
     <p>${stall.tier < 3 ? `A bigger stall holds ${cfg.tier_capacity[stall.tier + 1]} goods and serves ${cfg.tier_service[stall.tier + 1]} customers a night.` : 'This is the largest stall on the row.'}</p>
@@ -280,14 +292,17 @@ export function deedHtml({ stall, token, cfg, account, royaltyPct, freeSpots }) 
 }
 
 export function boardHtml(board, myId) {
-  const rows = board
-    .map((r) => {
-      const cls = r.id === myId ? 'me' : r.npc ? 'npc' : 'player'
-      const sub = r.spot == null ? 'off the row' : `${spotLabel(r.spot)} · size ${r.tier + 1}`
-      return `<li class="${cls}"><span class="rank">${r.rank}</span><span class="who">${esc(r.name)}<small>${sub}</small></span><span class="worth">${fmt(r.worth)}</span></li>`
-    })
-    .join('')
-  return `<p class="muted">Stalls on the row, by net worth: coin, goods at Dock value, stall size and half the spot's fee. Merchants trade by fixed rules; players are people like you on the same street.</p><ol class="board">${rows}</ol>`
+  const { players, merchants, closed } = rankGroups(board, myId)
+  const row = (r, cls, sub) => `<li class="${r.id === myId ? 'me' : cls}"><span class="rank">${r.place}</span><span class="who">${esc(r.name)}${r.id === myId ? ' <em>(you)</em>' : ''}<small>${sub(r)}</small></span><span class="worth">${fmt(r.worth)}</span></li>`
+  const onRow = (r) => (r.spot == null ? 'off the row' : `${spotLabel(r.spot)} · size ${r.tier + 1}`)
+  const playersHtml = players.length ? `<ol class="board">${players.map((r) => row(r, 'player', onRow)).join('')}</ol>` : '<p class="muted">No player stall is on the row right now. Open one and you lead.</p>'
+  const closedHtml = closed.length
+    ? `<details class="closed-stalls"><summary>${closed.length} closed stall${closed.length === 1 ? '' : 's'} <small>off the row, no customers · tap to show</small></summary><ol class="board">${closed.map((r) => row(r, 'closed', () => 'off the row: idle for 60 nights, or pushed off')).join('')}</ol></details>`
+    : ''
+  return `<p class="muted">By net worth: coin, goods at Dock value, stall size and half the spot's fee.</p>
+    <h3>Players on the row</h3>${playersHtml}
+    <h3>Merchants to beat</h3><p class="muted">They trade by fixed rules in the contract, out of their own coin.</p><ol class="board">${merchants.map((r) => row(r, 'npc', onRow)).join('')}</ol>
+    ${closedHtml}`
 }
 
 export function proofHtml({ contract, account, stallId, rpcHost, gasKey, txs, codeHash, explorer }) {
@@ -302,11 +317,12 @@ export function proofHtml({ contract, account, stallId, rpcHost, gasKey, txs, co
       <li><span>contract</span><code><a href="${explorer}/address/${esc(contract)}" target="_blank" rel="noopener">${esc(contract)}</a></code></li>
       <li><span>your account</span><code>${esc(account)}</code></li>
       <li><span>your stall token</span><code>${stallId ?? '–'}</code></li>
-      <li><span>code hash</span><code>${esc(codeHash)}</code></li>
-      <li><span>contract keys</span><code>none: nobody can patch it</code></li>
+      <li><span>contract keys</span><code class="proof-live" data-proof-keys>checking the chain…</code></li>
+      <li><span>code hash</span><code class="proof-live" data-proof-code title="${esc(codeHash)}">checking the chain…</code></li>
       <li><span>RPC in use</span><code>${esc(rpcHost)}</code></li>
       <li><span>gas paid by</span><code>${esc(gasKey ?? 'the public pool')}</code></li>
     </ul>
+    <p class="muted">Both lines above are read from NEAR testnet when this drawer opens (<code>view_access_key_list</code> and <code>view_account</code>); the hash is compared with <code>contract/WASM_SHA256</code> in the repository.</p>
     <h3>Your transactions</h3>
     <ul class="tx-list">${txRows}</ul>
     <h3>How it works</h3>
@@ -338,8 +354,9 @@ export function showPeek(stall, cfg, { x, y, mine, canBuy, onBuy, onClose }) {
   document.body.appendChild(el)
   const r = el.getBoundingClientRect()
   // keep it on screen: never past either edge, never under the top bar, never over the panel
-  const panelTop = $('panel').getBoundingClientRect().top
-  const hudBottom = $('hud').getBoundingClientRect().bottom
+  const visible = (id) => !$(id).classList.contains('hidden')
+  const panelTop = visible('panel') ? $('panel').getBoundingClientRect().top : visible('ticker') ? $('ticker').getBoundingClientRect().top : window.innerHeight
+  const hudBottom = visible('hud') ? $('hud').getBoundingClientRect().bottom : visible('watchbar') ? $('watchbar').getBoundingClientRect().bottom : 0
   el.style.left = `${Math.max(8, Math.min(window.innerWidth - r.width - 8, x - r.width / 2))}px`
   el.style.top = `${Math.max(hudBottom + 8, Math.min(panelTop - r.height - 8, y - r.height - 24))}px`
   el.querySelector('.close').addEventListener('click', () => {
@@ -352,4 +369,45 @@ export function showPeek(stall, cfg, { x, y, mine, canBuy, onBuy, onClose }) {
 
 export function hidePeek() {
   document.getElementById('peek')?.remove()
+}
+
+/** Fills in the Proof drawer's live lines once the chain has answered. `facts` from proofFacts(). */
+export function renderProofFacts(facts) {
+  const set = (sel, f) => {
+    const el = document.querySelector(sel)
+    if (!el) return
+    el.textContent = f.text
+    el.classList.toggle('ok', f.ok === true)
+    el.classList.toggle('bad', f.ok === false)
+  }
+  set('[data-proof-keys]', facts.keys)
+  set('[data-proof-code]', facts.code)
+}
+
+// ---- the title: watching the row ------------------------------------------------------------------
+
+/**
+ * The ticker along the bottom of the title: real sales, refusals and misses from the night logs,
+ * newest night first, as one line that scrolls. `nights` is [{tally, items}].
+ */
+export function renderTicker(nights, { reduced = false } = {}) {
+  const move = $('ticker-move')
+  const part = nights
+    .map((n) => `<span class="tick-night">${esc(n.tally)}</span>${n.items.map((i) => `<span class="tick ${esc(i.kind)}">${esc(i.text)}</span>`).join('')}`)
+    .join('')
+  if (!part) return $('ticker').classList.add('hidden')
+  // the line runs twice, so the scroll can wrap around without a gap
+  move.innerHTML = `<span class="tick-run">${part}</span><span class="tick-run" aria-hidden="true">${part}</span>`
+  $('ticker').classList.remove('hidden')
+  move.classList.toggle('still', reduced)
+  const width = move.firstElementChild.getBoundingClientRect().width
+  move.style.animationDuration = `${Math.max(20, Math.round(width / 70))}s`
+}
+
+export function setIdle(text) {
+  for (const id of ['title-idle']) {
+    const el = $(id)
+    el.textContent = text ?? ''
+    el.classList.toggle('hidden', !text)
+  }
 }
