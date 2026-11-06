@@ -93,7 +93,7 @@ It needs a browser with Ed25519 in WebCrypto: Chrome 137+, Safari 17+, Firefox 1
 node --test 'web/test/*.test.mjs'
 ```
 
-The contract's tests and economy simulation run with `cd contract && cargo test`. Expect a cold build of 15 minutes or more on a laptop: it compiles near-sdk and the test dependencies first; later runs take a minute or two. [CI](.github/workflows/ci.yml) runs both test suites on every push.
+The contract's tests and economy simulation run with `cd contract && cargo test`. Expect a cold build of 15 minutes or more on a laptop: it compiles near-sdk and the test dependencies first. The 167 tests themselves then run in about 30 seconds, most of it the economy simulation. [CI](.github/workflows/ci.yml) runs both test suites on every push.
 
 **End-to-end on testnet.** `scripts/e2e-browser.mjs` drives the real page in two headless Chrome profiles at once (one laptop, one phone) through the DevTools protocol: each founds or resumes a stall, restocks and reprices through the buttons, watches ten nights pass, answers tonight's call, reads the report and how the call went, opens the deed, lists the stall and withdraws it, and checks the other player on the leaderboard. It prints every transaction hash.
 

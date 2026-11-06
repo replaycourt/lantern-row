@@ -74,7 +74,7 @@ Every rule and number is in [SPEC.md](SPEC.md); the economy simulation is in [do
 ```sh
 node --test 'web/test/*.test.mjs'   # client logic and the NEAR layer; Node 22+, no install; about 5 seconds
 cd contract && cargo test           # the contract, its invariants and the economy simulation; toolchain from rust-toolchain.toml
-                                    # a cold build takes 15 minutes or more on a laptop, later runs a minute or two
+                                    # a cold build takes 15 minutes or more on a laptop; the 167 tests then run in about 30 seconds
 ```
 
 ## 5. What is real and what is not
