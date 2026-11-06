@@ -73,6 +73,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--amber); out
 .tick-night { font-weight: 800; color: #ffe08a; padding-left: 26px; }
 @keyframes tickerRun { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
+body.watching .toast { bottom: auto; top: 76px; }
 #unsupported { background: var(--indigo); }
 #unsupported h1 { font-size: 1.6rem; }
 #unsupported p { max-width: 460px; line-height: 1.5; opacity: 0.85; }

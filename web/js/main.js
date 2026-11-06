@@ -245,6 +245,7 @@ async function enterGame() {
     /* the poll loop will catch up */
   }
   stopReplay()
+  document.body.classList.remove('watching')
   scene.zoom = 1
   U.$('title').classList.add('hidden')
   U.$('watchbar').classList.add('hidden')
@@ -856,7 +857,7 @@ function startReplay() {
         continue
       }
       U.$('watch-line').textContent = `Replaying night ${L.fmt(log.night)} from the chain · tap a stall to see its prices`
-      await scene.playNight(log, { duration: reduced ? 6 : 16, reasonFor: reasonsFor(log, S.world) })
+      await scene.playNight(log, { duration: reduced ? 6 : 22, reasonFor: reasonsFor(log, S.world) })
       if (!W.on || W.token !== token) break
       await sleep(1200)
     }
@@ -928,6 +929,7 @@ function stopReplay() {
 /** "Watch the row": the title steps aside so the whole street shows; stalls can be tapped. */
 function setWatching(on) {
   W.watching = on
+  document.body.classList.toggle('watching', on)
   U.$('title').classList.toggle('hidden', on)
   U.$('watchbar').classList.toggle('hidden', !on)
   U.hidePeek()
