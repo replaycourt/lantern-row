@@ -1,7 +1,7 @@
 // Talks to the Lantern Row contract: the player's local key, the public gas pool, views, `act` and
 // `advance_night`, with retries over keys and RPC hosts. The UI never sees a transaction; it sees
 // promises that resolve to game outcomes, and friendly errors when the network is in a mood.
-import { Rpc, RpcError, encodeTx, functionCallAction, hex, implicitAccount, keyFromNearString, keyFromSeed, newKey, nearPublicKey, sign, signTx, sleep, summarise, txHash, unhex, utf8 } from './near.js'
+import { Rpc, RpcError, b58decode, encodeTx, functionCallAction, hex, implicitAccount, keyFromNearString, keyFromSeed, newKey, nearPublicKey, sign, signTx, sleep, summarise, txHash, unhex, utf8 } from './near.js'
 import { CONTRACT, GAS_ACCOUNT, GAS_KEYS, RPC_HOSTS } from './gas-keys.js'
 import { coalesce, signingText } from './logic.js'
 
@@ -197,6 +197,15 @@ export class Client {
     return this.view('dock_quote', { good, qty })
   }
 
+  /**
+   * Two facts about the game account, read live for the Proof drawer: how many access keys it has
+   * and the sha256 of its deployed code, in hex. {keyCount, codeHashHex}
+   */
+  async contractFacts() {
+    const [keys, account] = await Promise.all([this.rpc.accessKeyList(this.contract), this.rpc.viewAccount(this.contract)])
+    return { keyCount: keys.keys.length, codeHashHex: codeHashHex(account.code_hash) }
+  }
+
   async setIdentity(identity) {
     this.identity = identity
     const me = await this.player()
@@ -258,6 +267,11 @@ export class Client {
     if (r.failure) throw new FriendlyError('The night would not end. Trying again shortly.', new Error(r.failure))
     return r.value
   }
+}
+
+/** NEAR shows a code hash in base58; the repository keeps the sha256 in hex. */
+export function codeHashHex(b58) {
+  return hex(b58decode(b58)).padStart(64, '0')
 }
 
 // ---- the action queue ---------------------------------------------------------------------------

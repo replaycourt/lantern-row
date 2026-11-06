@@ -211,6 +211,16 @@ export class Rpc {
     return JSON.parse(new TextDecoder().decode(new Uint8Array(r.result)))
   }
 
+  /** The access keys of an account: `{keys: [{public_key, access_key}]}`. */
+  async accessKeyList(accountId) {
+    return this.call('query', { request_type: 'view_access_key_list', finality: 'final', account_id: accountId })
+  }
+
+  /** An account's balance, storage and code hash (base58; all ones when no code is deployed). */
+  async viewAccount(accountId) {
+    return this.call('query', { request_type: 'view_account', finality: 'final', account_id: accountId })
+  }
+
   async accessKeyNonce(accountId, publicKey) {
     const k = await this.call('query', { request_type: 'view_access_key', finality: 'optimistic', account_id: accountId, public_key: publicKey })
     return BigInt(k.nonce)

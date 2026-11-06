@@ -490,17 +490,22 @@ export function summariseNight({ log, stall, before, world, cfg, villagers, nigh
 
   if (refusals.length) {
     const byGood = new Map()
-    for (const [v, , g] of refusals) byGood.set(g, [...(byGood.get(g) ?? []), vname(v)])
+    for (const [v, , g] of refusals) byGood.set(g, [...(byGood.get(g) ?? []), v])
     if (byGood.size > 2) {
       const names = refusals.map(([v]) => vname(v))
       lines.push({ icon: 'frown', text: `${listNames(names)} found your ${listWords([...byGood.keys()].map(gname))} too dear. Nobody on the row was cheap enough for them.` })
       byGood.clear()
     }
-    for (const [g, names] of byGood) {
+    for (const [g, vs] of byGood) {
+      const names = vs.map(vname)
       const price = stall.price[g] || before?.price?.[g] || 0
       const rival = cheapestRival(world, id, g)
       const tail = rival && rival.price[g] < price ? ` ${rival.name} asks ${fmt(rival.price[g])}.` : names.length > 1 ? ' Nobody on the row was cheap enough for them.' : ` Nobody on the row was cheap enough for ${names[0]}.`
-      lines.push({ icon: 'frown', text: `${listNames(names)} found your ${gname(g)} too dear at ${fmt(price)}.${tail}` })
+      // what the keenest of them would have paid here, worked out as the contract does
+      const pays = vs.map((v) => refusalReason({ log, world, cfg, villager: v, stall: id, good: g })).filter((r) => r && r.kind !== 'elsewhere' && r.max < price)
+      const most = pays.length ? Math.max(...pays.map((r) => r.max)) : null
+      const keen = most == null ? '' : ` ${new Set(names).size > 1 ? 'The keenest' : names[0]} would pay ${fmt(most)} at most.`
+      lines.push({ icon: 'frown', text: `${listNames(names)} found your ${gname(g)} too dear at ${fmt(price)}.${keen}${tail}` })
     }
   }
 
@@ -836,4 +841,249 @@ export function rankOf(board, id) {
 /** The ranks worth showing: stalls on the row, plus the player's own wherever it is, renumbered. */
 export function visibleBoard(board, myId) {
   return board.filter((r) => r.spot != null || r.id === myId).map((r, i) => ({ ...r, rank: i + 1 }))
+}
+
+// ---- watching the row: the replay, its ticker and an idle town ------------------------------------
+
+/** The deployed wasm's sha256, as in contract/WASM_SHA256. The Proof drawer compares the chain's with it. */
+export const WASM_SHA256 = '1be4c4d2b9f97af91ebb94d32817c8d572f7064a2d5aafe730c8ab1d7d2b4e9b'
+
+/** "19 hours", "40 minutes", "3 days": a rough length of time, for people. */
+export function roughDuration(ms) {
+  const min = Math.max(0, Math.round(ms / 60000))
+  if (min < 60) return `${min} minute${min === 1 ? '' : 's'}`
+  const h = Math.round(min / 60)
+  if (h < 48) return `${h} hour${h === 1 ? '' : 's'}`
+  const d = Math.round(h / 24)
+  return `${d} days`
+}
+
+/**
+ * When nobody has played for a while, the night that should have ended is still open: the contract
+ * only moves when someone calls `advance_night`. Says so plainly, or returns null when the town is
+ * on time (a night a few seconds late is normal: the next client closes it).
+ */
+export function idleNotice(world, cfg) {
+  if (!world?.due || world.now_ms == null || world.ends_ms == null) return null
+  const late = world.now_ms - world.ends_ms
+  if (late < 60000) return null
+  const most = cfg?.max_catchup_nights ?? 30
+  return `The row has been quiet for ${roughDuration(late)}. The next player to act catches it up, up to ${most} nights at once.`
+}
+
+/**
+ * Why a villager walked away from a stall's good ("Too dear!"), from the same rules the contract
+ * walks by (SPEC section 5). Returns one of
+ *   {kind: 'elsewhere', price, at}  they bought it at stall `at` for `price` the same night (exact, from the log)
+ *   {kind: 'wallet', max}           they had only `max` coin left
+ *   {kind: 'wtp', max}              they would pay at most `max` at this stall
+ * or null. The last two rebuild the villager as they walked: the world after the night, with what
+ * they spent that night put back, the night of need restored and the faded memory undone. They are
+ * only worked out for the night that just ended (`world.night === log.night + 1`), and the stall's
+ * reputation and price are today's, so `max` can be off by a percent; a reason the stall's price
+ * on show would contradict is not given.
+ */
+export function refusalReason({ log, world, cfg, villager: vi, stall: sid, good: g }) {
+  const bought = (log?.sales ?? []).find(([v, s, gg]) => v === vi && gg === g && s !== sid)
+  if (bought) return { kind: 'elsewhere', price: bought[3], at: bought[1] }
+  if (!world || !cfg?.goods?.[g] || world.night !== log?.night + 1) return null
+  const v = (world.villagers ?? []).find((x) => x.id === vi)
+  const stall = (world.row ?? []).find((x) => x.id === sid)
+  if (!v || !stall || !(v.taste?.[g] > 0)) return null
+  const spent = (log.sales ?? []).filter(([x]) => x === vi).reduce((a, s) => a + s[3], 0)
+  const wallet = v.wallet + spent // wages are paid before the walk, so this is the wallet they walked with
+  const wealth = wealthPct(wallet, v.wage)
+  const period = needPeriod(cfg.goods[g], v.taste[g])
+  let unmet = Math.max(0, (v.unmet?.[g] ?? 0) - 1) + spareNights(wealth)
+  if (eventGood(log.event, 'festival') === g) unmet = Math.max(unmet, period) + 1
+  const over = Math.max(0, unmet - period)
+  const wtp = willingness(cfg.goods[g], v.taste[g], over, wealth, log.event, g)
+  const memAfter = v.memory?.find((m) => m[0] === sid)?.[1] ?? 0
+  const max = Math.min(stallWtp(wtp, stall.rep, memAfter > 0 ? memAfter + 1 : 0), wallet)
+  // A merchant reprices after the walk, and reputation moved: never give a reason the price on show contradicts.
+  if (stall.price[g] > 0 && stall.price[g] <= max) return null
+  return { kind: max === wallet ? 'wallet' : 'wtp', max }
+}
+
+/** The few words under a "Too dear!" bubble. */
+export function refusalWords(reason) {
+  if (!reason) return null
+  if (reason.kind === 'elsewhere') return `paid ${fmt(reason.price)} elsewhere`
+  if (reason.kind === 'wallet') return `has only ${fmt(reason.max)} coin`
+  return `pays ${fmt(reason.max)} at most`
+}
+
+/** One sentence per sale, refusal and miss of a night, in walking order, for the title ticker. */
+export function tickerItems(log, { world = null, cfg = null, names = new Map() } = {}) {
+  if (!log) return []
+  const vname = (v) => world?.villagers?.find((x) => x.id === v)?.name ?? `Villager ${v + 1}`
+  const sname = (id) => names.get(id) ?? world?.row?.find((s) => s.id === id)?.name ?? `stall ${id}`
+  const gname = (g) => cfg?.goods?.[g]?.name ?? GOODS[g]
+  const out = []
+  const steps = buildWalk(log)
+  for (const sc of steps) {
+    for (const st of sc.stops) {
+      if (st.kind === 'buy') out.push({ kind: 'buy', text: `${vname(sc.villager)} bought ${gname(st.good)} at ${sname(st.stall)} for ${fmt(st.price)}` })
+      else {
+        const r = refusalReason({ log, world, cfg, villager: sc.villager, stall: st.stall, good: st.good })
+        const why = r?.kind === 'elsewhere' ? `, then paid ${fmt(r.price)} at ${sname(r.at)}` : r ? `: ${refusalWords(r)}` : ''
+        out.push({ kind: 'refuse', text: `${vname(sc.villager)} found ${gname(st.good)} too dear at ${sname(st.stall)}${why}` })
+      }
+    }
+    for (const g of sc.missed) out.push({ kind: 'miss', text: `${vname(sc.villager)} wanted ${gname(g)}; nobody on the row had any` })
+  }
+  return out
+}
+
+/** "Night 580: 21 sales, 14 too dear, 1 found nothing" */
+export function nightTally(log) {
+  if (!log) return ''
+  const n = (x, one, many) => `${fmt(x)} ${x === 1 ? one : many}`
+  const parts = [n(log.sales?.length ?? 0, 'sale', 'sales')]
+  if (log.refusals?.length) parts.push(`${fmt(log.refusals.length)} too dear`)
+  if (log.missed?.length) parts.push(`${fmt(log.missed.length)} found nothing`)
+  return `Night ${fmt(log.night)}: ${parts.join(', ')}`
+}
+
+// ---- goals: milestones and standing ---------------------------------------------------------------
+
+/**
+ * The worth milestones a stall climbs, from the contract's own numbers: the starter grant, the first
+ * profits, what each bigger stall costs (`tier_cost`), what the front spot costs (`spots[0].fee`), and
+ * round numbers in between. Sorted, each {at, label}. The first one is the grant, the starting line.
+ */
+export function milestones(cfg) {
+  const grant = cfg?.starter_grant ?? 3000
+  const tiers = cfg?.tier_cost ?? [0, 5000, 14000, 36000]
+  const front = cfg?.spots?.[0]?.fee ?? 6912
+  const list = [
+    { at: grant, label: 'the starter grant' },
+    { at: grant + 500, label: 'your first 500 coin of profit' },
+    { at: grant + 1000, label: 'your first 1,000 coin of profit' },
+    { at: front, label: 'what the front spot costs' },
+    { at: 10000, label: 'a five-figure stall' },
+    { at: 20000, label: 'twenty thousand coin' },
+    { at: 50000, label: 'fifty thousand coin' },
+    { at: 100000, label: 'a hundred thousand coin' },
+  ]
+  tiers.forEach((cost, t) => t > 0 && cost > 0 && list.push({ at: cost, label: `what a size-${t + 1} stall costs` }))
+  const seen = new Map()
+  for (const m of list.sort((a, b) => a.at - b.at)) if (!seen.has(m.at)) seen.set(m.at, m)
+  return [...seen.values()]
+}
+
+/** Where a worth stands on the ladder: {prev, next, frac, text}, e.g. text "3,006 → 3,500". */
+export function goalProgress(worth, list) {
+  const w = Math.max(0, worth ?? 0)
+  const next = list.find((m) => m.at > w) ?? null
+  const prev = [...list].reverse().find((m) => m.at <= w) ?? { at: 0, label: '' }
+  const frac = next ? Math.max(0, Math.min(1, (w - prev.at) / Math.max(1, next.at - prev.at))) : 1
+  return { prev, next, frac, text: next ? `${fmt(w)} → ${fmt(next.at)}` : fmt(w) }
+}
+
+/** The milestones passed going from worth `from` up to `to`, lowest first. */
+export function crossedMilestones(from, to, list) {
+  if (from == null || to == null || to <= from) return []
+  return list.filter((m) => m.at > from && m.at <= to && m.at > 0)
+}
+
+/**
+ * The leaderboard in three groups, players first: player stalls on the row (and the player's own,
+ * wherever it is), the merchants, and closed stalls (players' stalls that lost their spot, which have
+ * no customers). Each row keeps its board rank and gets `place`, its place in its group.
+ */
+export function rankGroups(board, myId) {
+  const rows = [...(board ?? [])].sort((a, b) => b.worth - a.worth || a.id - b.id)
+  const players = rows.filter((r) => !r.npc && (r.spot != null || r.id === myId))
+  const merchants = rows.filter((r) => r.npc)
+  const closed = rows.filter((r) => !r.npc && r.spot == null && r.id !== myId)
+  const place = (list) => list.map((r, i) => ({ ...r, place: i + 1 }))
+  return { players: place(players), merchants: place(merchants), closed: place(closed) }
+}
+
+/**
+ * A stall's standing for the HUD: its place among the players, the player just ahead, and the
+ * nearest merchant above it (the next one to beat), and how many merchants it has passed.
+ * {place, of, ahead, merchant, below}; place is null when the stall is not on the board.
+ */
+export function standing(board, myId) {
+  const { players, merchants } = rankGroups(board, myId)
+  const me = players.find((r) => r.id === myId)
+  if (!me) return { place: null, of: players.length, ahead: null, merchant: null, below: 0 }
+  const ahead = me.place > 1 ? players[me.place - 2] : null
+  const above = merchants.filter((m) => m.worth > me.worth)
+  return { place: me.place, of: players.length, ahead, merchant: above.length ? above[above.length - 1] : null, below: merchants.length - above.length }
+}
+
+/** The toast for a milestone just passed. */
+export function milestoneText(m) {
+  const hint = /size-\d stall costs/.test(m.label) ? ' Grow the stall from the Deed.' : /front spot/.test(m.label) ? ' Move up the row from the Deed.' : ''
+  return `Milestone: worth ${fmt(m.at)}, ${m.label}.${hint}`
+}
+
+/** The HUD's line under the goal bar: "#2 of 5 players · beat Seven Knots, 33,430". */
+export function standingText(st) {
+  if (!st?.place) return null
+  const next = st.merchant ? `beat ${st.merchant.name}, ${fmt(st.merchant.worth)}` : 'ahead of every merchant'
+  return { place: `#${st.place} of ${st.of} player${st.of === 1 ? '' : 's'}`, next }
+}
+
+/** A toast when a stall moves up: past another player, or past a merchant. Null when nothing changed. */
+export function passedText(before, after) {
+  if (!before?.place || !after?.place) return null
+  if (after.below > before.below && before.merchant) return `You passed the merchant ${before.merchant.name}: ${after.below} of the merchants are behind you.`
+  if (after.place < before.place && before.ahead) return `You passed ${before.ahead.name}: #${after.place} of ${after.of} players.`
+  return null
+}
+
+// ---- the price cards, in sentences ---------------------------------------------------------------
+
+/**
+ * What a goods card says under its price: a sentence for wide screens (`long`), a few words for a
+ * phone (`short`), and the whole story for a tap (`full`). From tonight's forecast and the row.
+ */
+export function priceNote({ fc = null, g, price, stock, world = null, stallId = null, cfg = null }) {
+  const rival = world ? cheapestRival(world, stallId, g) : null
+  const dock = world?.dock?.[g]?.price
+  const gname = cfg?.goods?.[g]?.name ?? GOODS[g]
+  const f = fc?.[g]
+  const elsewhere = rival ? `Cheapest elsewhere: ${fmt(rival.price[g])}.` : 'Nobody else sells it.'
+  const wanted = f ? f.wanted : null
+  let long
+  let short
+  if (!(price > 0)) {
+    long = 'Not for sale. Tap + to price it.'
+    short = 'not for sale'
+  } else if (!(stock > 0)) {
+    long = wanted ? `${wanted} want it tonight. Restock to sell.` : 'None in stock.'
+    short = wanted ? 'restock it' : 'none in stock'
+  } else if (wanted === 0) {
+    long = `Nobody needs it tonight. ${elsewhere}`
+    short = 'not needed'
+  } else if (wanted) {
+    const n = expectSales(fc, g, price, { stock })
+    const buy = n >= 0.5 ? `about ${Math.round(n)} may buy here` : 'few will buy here'
+    long = `${wanted} want it, ${buy}. ${elsewhere}`
+    short = n >= 0.5 ? `about ${Math.round(n)} buy` : 'few buy'
+  } else {
+    long = elsewhere
+    short = rival ? `elsewhere ${fmt(rival.price[g])}` : ''
+  }
+  const parts = [`${gname[0].toUpperCase()}${gname.slice(1)}${price > 0 ? ` at ${fmt(price)}` : ''}:`, long]
+  if (dock != null) parts.push(`The Dock sells it at ${fmt(dock)}.`)
+  return { long, short, full: parts.join(' ') }
+}
+
+// ---- proof ---------------------------------------------------------------------------------------
+
+/**
+ * The Proof drawer's two live facts, from `view_access_key_list` and `view_account` of the contract:
+ * how many access keys it has (none means nobody can redeploy it or act as it), and whether its
+ * code hash (hex) equals the build in the repository. {keys: {ok, text}, code: {ok, text}}.
+ */
+export function proofFacts({ keyCount, codeHashHex, expected = WASM_SHA256 }) {
+  const keys = keyCount == null ? { ok: null, text: 'could not be read just now' } : keyCount === 0 ? { ok: true, text: 'none: nobody can patch it (read live)' } : { ok: false, text: `${keyCount} key${keyCount === 1 ? '' : 's'}: this account could be changed` }
+  const short = (h) => `${h.slice(0, 8)}…${h.slice(-6)}`
+  const code = !codeHashHex ? { ok: null, text: 'could not be read just now' } : codeHashHex === expected ? { ok: true, text: `${short(codeHashHex)}, the same as contract/WASM_SHA256 (read live)` } : { ok: false, text: `${short(codeHashHex)} on chain, but contract/WASM_SHA256 says ${short(expected)}` }
+  return { keys, code }
 }
