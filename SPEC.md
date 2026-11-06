@@ -122,7 +122,7 @@ Play goes through `act`, signed by the key and relayed by anyone. Gas comes from
 
 A wallet that buys a stall plays through `play`, signing its own transactions. An implicit account that gets funded and holds its key can use `nft_transfer` directly.
 
-The web client in `web/` does exactly this with WebCrypto's Ed25519 (Chrome 137+, Safari 17+, Firefox 130+) and no library: the key lives in the browser's local storage, the pool keys are in `web/js/gas-keys.js`, and the client itself calls `advance_night` whenever `world().due` is true. Transactions from the same tab are serialised, so the player's nonces never overtake each other; a view that still shows an older nonce than the client's last signed one is ignored, so the optimistic state is never rolled back by a lagging view.
+The web client in `web/` does exactly this with WebCrypto's Ed25519 (Chrome 137+, Safari 17+, Firefox 130+) and no library: the key lives in the browser's local storage, the pool keys are in `web/js/gas-keys.js`, and the client itself calls `advance_night` whenever `world().due` is true while a player plays (the title screen, which only replays the latest night logs, never does). Transactions from the same tab are serialised, so the player's nonces never overtake each other; a view that still shows an older nonce than the client's last signed one is ignored, so the optimistic state is never rolled back by a lagging view.
 
 ## 12. API
 
