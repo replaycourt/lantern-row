@@ -1,5 +1,6 @@
 // DOM side of the client: the HUD, the goods counter, hints, the night summary, sheets, toasts.
 // Everything that comes from the chain goes through escapeHtml before it touches innerHTML.
+import { houseBot, isHouseBot } from './house-bots.js'
 import { GOOD_SHORT, escapeHtml as esc, fmt, shortAccount, eventInfo, bannerText, spotLabel, priceNote, rankGroups, standingText } from './logic.js'
 
 export const $ = (id) => document.getElementById(id)
@@ -252,7 +253,7 @@ export function deedHtml({ stall, token, cfg, account, royaltyPct, freeSpots }) 
       </div>
       <div class="deed-body">
         <div class="deed-kicker">Stall deed · No. ${stall.id} · Lantern Row</div>
-        <div class="deed-title">${esc(stall.name)}</div>
+        <div class="deed-title">${esc(stall.name)}${isHouseBot(stall) ? ' ' + botTag() : ''}</div>
         <p class="deed-sub">${place} · size ${stall.tier + 1}</p>
         <div class="deed-stats">
           <div><b>${fmt(stall.money)}</b><span>coin inside</span></div>
@@ -261,7 +262,7 @@ export function deedHtml({ stall, token, cfg, account, royaltyPct, freeSpots }) 
           <div><b>${fmt(stall.worth)}</b><span>net worth</span></div>
         </div>
         <div class="deed-shelf">${shelf}</div>
-        <p class="deed-royalty">Founder <code>${esc(shortAccount(stall.founder))}</code> earns <b>${royaltyPct}%</b> of every resale${stall.customers ? ` · ${fmt(stall.customers)} villagers served` : ''}</p>
+        <p class="deed-royalty">Founder <code>${esc(shortAccount(stall.founder))}</code>${houseBot(stall.founder) ? ' ' + botTag() : ''} earns <b>${royaltyPct}%</b> of every resale${stall.customers ? ` · ${fmt(stall.customers)} villagers served` : ''}</p>
       </div>
       <div class="stamp-seal">LANTERN<br>ROW</div>
     </div>
@@ -291,16 +292,27 @@ export function deedHtml({ stall, token, cfg, account, royaltyPct, freeSpots }) 
     <p class="muted">Token <code>${stall.id}</code> on <code>${esc(cfg.contract ?? 'lantern-row.testnet')}</code>: a NEP-171 NFT whose picture and description are computed from the live stall.</p>`
 }
 
+/** The small tag on every stall a house bot runs (web/js/house-bots.js). */
+export function botTag() {
+  return '<span class="bot-tag" title="Run by a script with fixed rules">house bot</span>'
+}
+
 export function boardHtml(board, myId) {
   const { players, merchants, closed } = rankGroups(board, myId)
-  const row = (r, cls, sub) => `<li class="${r.id === myId ? 'me' : cls}"><span class="rank">${r.place}</span><span class="who">${esc(r.name)}${r.id === myId ? ' <em>(you)</em>' : ''}<small>${sub(r)}</small></span><span class="worth">${fmt(r.worth)}</span></li>`
+  const row = (r, cls, sub) => {
+    const bot = isHouseBot(r)
+    return `<li class="${r.id === myId ? 'me' : bot && cls === 'player' ? 'player bot' : cls}"><span class="rank">${r.place}</span><span class="who">${esc(r.name)}${r.id === myId ? ' <em>(you)</em>' : ''}${bot ? ' ' + botTag() : ''}<small>${sub(r)}</small></span><span class="worth">${fmt(r.worth)}</span></li>`
+  }
   const onRow = (r) => (r.spot == null ? 'off the row' : `${spotLabel(r.spot)} · size ${r.tier + 1}`)
   const playersHtml = players.length ? `<ol class="board">${players.map((r) => row(r, 'player', onRow)).join('')}</ol>` : '<p class="muted">No player stall is on the row right now. Open one and you lead.</p>'
   const closedHtml = closed.length
     ? `<details class="closed-stalls"><summary>${closed.length} closed stall${closed.length === 1 ? '' : 's'} <small>off the row, no customers · tap to show</small></summary><ol class="board">${closed.map((r) => row(r, 'closed', () => 'off the row: idle for 60 nights, or pushed off')).join('')}</ol></details>`
     : ''
+  const botNote = players.some((r) => isHouseBot(r))
+    ? `<p class="muted">Stalls tagged ${botTag()} are run by a script with fixed rules, to keep the row busy. They play by the same contract rules as you.</p>`
+    : ''
   return `<p class="muted">By net worth: coin, goods at Dock value, stall size and half the spot's fee.</p>
-    <h3>Players on the row</h3>${playersHtml}
+    <h3>Players on the row</h3>${playersHtml}${botNote}
     <h3>Merchants to beat</h3><p class="muted">They trade by fixed rules in the contract, out of their own coin.</p><ol class="board">${merchants.map((r) => row(r, 'npc', onRow)).join('')}</ol>
     ${closedHtml}`
 }
@@ -334,6 +346,7 @@ export function proofHtml({ contract, account, stallId, rpcHost, gasKey, txs, co
 
 export function showPeek(stall, cfg, { x, y, mine, canBuy, onBuy, onClose }) {
   hidePeek()
+  const bot = isHouseBot(stall) ? houseBot(stall.owner) : null
   const el = document.createElement('div')
   el.className = 'peek'
   el.id = 'peek'
@@ -346,7 +359,8 @@ export function showPeek(stall, cfg, { x, y, mine, canBuy, onBuy, onClose }) {
     })
     .join('')
   el.innerHTML = `
-    <b>${esc(stall.name)}</b> <span class="muted">${stall.npc ? '· merchant' : mine ? '· yours' : '· player'}</span>
+    <b>${esc(stall.name)}</b> <span class="muted">${stall.npc ? '· merchant' : mine ? '· yours' : bot ? '· house bot' : '· player'}</span>
+    ${bot ? `<div class="npc-note">${botTag()} ${esc(bot.rule)} Run by a script, by the same rules as players.</div>` : ''}
     <div class="muted">${spotLabel(stall.spot)} · ${stall.footfall ?? 0}% walk-by · rep ${fmt(stall.rep / 10)}/100 · worth ${fmt(stall.worth)}</div>
     <table>${rows}</table>
     ${stall.listed != null ? `<p><span class="listed-tag">FOR SALE</span> ${fmt(stall.listed)} coin${canBuy ? ' <button class="small primary" type="button" data-buy>Buy it</button>' : ''}</p>` : ''}

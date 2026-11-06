@@ -1,6 +1,7 @@
 // Pure game logic of the client: no DOM, no network, no canvas. Everything here is unit-tested with
 // `node --test web/test`. The rules it mirrors are in SPEC.md; the contract is the truth, this only
 // helps the player decide and explains what happened.
+import { isHouseBot } from './house-bots.js'
 
 export const GOODS = ['tea', 'lamp oil', 'dumplings', 'silk', 'charms']
 export const GOOD_SHORT = ['Tea', 'Oil', 'Dumplings', 'Silk', 'Charms']
@@ -381,12 +382,14 @@ export function titleLine(world, cfg) {
   const count = (n, one, many = `${one}s`) => `${fmt(n)} ${n === 1 ? one : many}`
   const shoppers = (world.villagers ?? []).filter((v) => villagerWants(v, cfg, world.event).length > 0).length
   const merchants = world.row.filter((s) => s.npc).length
-  const players = world.row.length - merchants
+  const bots = world.row.filter((s) => isHouseBot(s)).length
+  const players = world.row.length - merchants - bots
   return [
     `Night ${fmt(world.night)}`,
     shoppers ? `${count(shoppers, 'villager')} shopping` : 'no villagers shopping',
     count(merchants, 'merchant'),
     players ? count(players, 'player stall') : 'no player stalls yet',
+    ...(bots ? [count(bots, 'house bot')] : []),
   ]
     .map((part) => part.replaceAll(' ', '\u00a0'))
     .join('\u00a0· ')

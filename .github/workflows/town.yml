@@ -1,0 +1,45 @@
+# Keeps the row alive while nobody plays: five house bots ("Bot - ...") tend their stalls and a
+# keeper ends due nights, through the same public gas keys and contract rules as every player.
+# The strategy is in scripts/house-bots.mjs. Each run lasts just under six hours and the schedule
+# starts the next one, so the runs follow each other with short gaps.
+#
+# The bot keys come only from the repository secret LANTERN_ROW_BOTS (a JSON array of hex seeds).
+# Without it the job logs "no bot keys, nothing to do" and succeeds. It reads nothing else secret,
+# and it writes nothing to the repository.
+name: Town
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: How long to run, in minutes (at most 350)
+        default: '350'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: town
+  cancel-in-progress: false
+
+jobs:
+  bots:
+    name: House bots and keeper
+    runs-on: ubuntu-latest
+    timeout-minutes: 358
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No install: the script uses only Node's standard library and the client's own modules.
+      - name: Run the house bots
+        env:
+          LANTERN_ROW_BOTS: ${{ secrets.LANTERN_ROW_BOTS }}
+          MINUTES: ${{ github.event.inputs.minutes || '350' }}
+        run: |
+          case "$MINUTES" in ''|*[!0-9]*) echo "minutes must be a whole number"; exit 64;; esac
+          if [ "$MINUTES" -gt 350 ]; then MINUTES=350; fi
+          node scripts/house-bots.mjs --minutes "$MINUTES"

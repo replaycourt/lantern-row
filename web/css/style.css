@@ -285,6 +285,8 @@ body.watching .toast { bottom: auto; top: 76px; }
 .board li.me { background: var(--amber); font-weight: 800; }
 .board li.npc .who small::after { content: " · merchant"; }
 .board li.player .who small::after { content: " · player"; }
+.board li.bot .who small::after { content: " · fixed rules"; }
+.bot-tag { display: inline-block; vertical-align: 0.15em; background: #d9e4ec; color: #2c3e50; font-size: 0.62rem; font-weight: 800; padding: 1px 7px; border-radius: 999px; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
 .board .rank { font-weight: 800; font-size: 1.1rem; text-align: center; }
 .board .who { font-weight: 700; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .board .who small { display: block; font-weight: 500; opacity: 0.65; font-size: 0.75rem; }

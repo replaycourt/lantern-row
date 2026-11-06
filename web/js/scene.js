@@ -2,6 +2,7 @@
 // sky, rooftops, lamp posts, stalls, villagers, coins, rain, fireworks. The scene knows nothing about
 // the chain; it is fed a world view and a night log and plays them.
 import { buildWalk, bubbleText, stallHue } from './logic.js'
+import { isHouseBot } from './house-bots.js'
 
 export const SPOT_W = 210 // world units between spots; spot 0 is at x = 0, near the town gate on the left
 const SPOTS = 24
@@ -1035,6 +1036,16 @@ export class Scene {
     ctx.fill()
     ctx.fillStyle = isMe ? '#ffe08a' : '#f3dcb8'
     ctx.fillText(name, cx, signY + 14.5 * k)
+    if (isHouseBot(s)) {
+      // a small plate over the sign: this stall is run by a script (web/js/house-bots.js)
+      ctx.font = `bold ${8.5 * k}px ${FONT}`
+      const bw = ctx.measureText('HOUSE BOT').width + 12 * k
+      ctx.fillStyle = '#d9e4ec'
+      roundRect(ctx, cx - bw / 2, signY - 14 * k, bw, 13 * k, 6.5 * k)
+      ctx.fill()
+      ctx.fillStyle = '#2c3e50'
+      ctx.fillText('HOUSE BOT', cx, signY - 4.5 * k)
+    }
     // lanterns hanging from the awning
     const lanterns = 1 + s.tier
     for (let i = 0; i < lanterns; i++) {

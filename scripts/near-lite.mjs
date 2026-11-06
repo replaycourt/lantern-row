@@ -89,7 +89,13 @@ const transferAction = (deposit) => Buffer.concat([u8(3), u128(deposit)])
 
 // ---- RPC ----------------------------------------------------------------------------------------
 
-export const RPC = process.env.NEAR_RPC || 'https://test.rpc.fastnear.com'
+// NEAR_RPC pins one host. Otherwise the public testnet hosts the web client uses, in turn: a rate
+// limit (HTTP 429) or a network failure moves to the next one.
+const HOSTS = process.env.NEAR_RPC ? [process.env.NEAR_RPC] : ['https://test.rpc.fastnear.com', 'https://near-testnet.drpc.org']
+let host = 0
+export let RPC = HOSTS[0]
+
+const rateLimited = (status, error) => status === 429 || /-429|rate limit/i.test(JSON.stringify(error ?? ''))
 
 export async function rpc(method, params) {
   for (let attempt = 0; ; attempt++) {
@@ -100,7 +106,13 @@ export async function rpc(method, params) {
         body: JSON.stringify({ jsonrpc: '2.0', id: '1', method, params }),
         signal: AbortSignal.timeout(60_000),
       })
-      const j = await r.json()
+      const j = await r.json().catch(() => ({ error: { status: r.status } }))
+      if (rateLimited(r.status, j.error) && attempt < 6) {
+        host = (host + 1) % HOSTS.length
+        RPC = HOSTS[host]
+        await new Promise((s) => setTimeout(s, 1000 * 2 ** Math.min(attempt, 4)))
+        continue
+      }
       if (j.error) {
         const retriable = /TIMEOUT|HANDLER|UNKNOWN_BLOCK/.test(JSON.stringify(j.error)) && attempt < 4
         if (retriable) {
@@ -112,6 +124,8 @@ export async function rpc(method, params) {
       return j.result
     } catch (e) {
       if (attempt >= 4 || String(e.message).startsWith('rpc ')) throw e
+      host = (host + 1) % HOSTS.length
+      RPC = HOSTS[host]
       await new Promise((s) => setTimeout(s, 1500))
     }
   }
@@ -167,6 +181,8 @@ export class Signer {
 export function summarise(res) {
   const outcomes = [res.transaction_outcome, ...res.receipts_outcome]
   const gas = outcomes.reduce((n, o) => n + o.outcome.gas_burnt, 0)
+  // NEAR burnt by the whole transaction (all outcomes), from the chain's own tokens_burnt.
+  const near = Number(outcomes.reduce((n, o) => n + BigInt(o.outcome.tokens_burnt ?? 0), 0n)) / 1e24
   // The receipt that ran the contract: the first after the transaction itself.
   const contractGas = res.receipts_outcome[0]?.outcome.gas_burnt ?? 0
   const failure = res.status.Failure ? JSON.stringify(res.status.Failure) : null
@@ -178,7 +194,7 @@ export function summarise(res) {
       value = res.status.SuccessValue
     }
   }
-  return { hash: res.transaction.hash, gas, contractGas, failure, value, logs: res.receipts_outcome.flatMap((o) => o.outcome.logs) }
+  return { hash: res.transaction.hash, gas, near, contractGas, failure, value, logs:res.receipts_outcome.flatMap((o) => o.outcome.logs) }
 }
 
 export const tgas = (g) => (g / 1e12).toFixed(2)
