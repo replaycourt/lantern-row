@@ -332,6 +332,31 @@ body.watching .toast { bottom: auto; top: 76px; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 @keyframes stampIn { 0% { transform: scale(1.06); border-color: var(--jade); } 100% { transform: scale(1); } }
 
+/* ---- fast-forward sheet ---- */
+.ff-note { font-size: 0.82rem; color: #6b5a6e; margin: 0 0 10px; }
+.ff-head { font-size: 1.05rem; margin-bottom: 6px; }
+.ff-head span { color: #6b5a6e; }
+.ff-label { margin: 10px 0 4px; font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: #6b5a6e; }
+.ff-chart { width: 100%; height: auto; display: block; }
+.ff-chart .ff-grid { stroke: rgba(42, 29, 46, 0.1); }
+.ff-chart .ff-base { stroke: rgba(42, 29, 46, 0.35); stroke-dasharray: 3 3; }
+.ff-chart .ff-flood { stroke: #d9775b; stroke-dasharray: 4 3; }
+.ff-chart .ff-axis { font-size: 9px; fill: #6b5a6e; }
+.ff-chart .ff-line { fill: none; stroke-width: 1.5; opacity: 0.55; }
+.ff-chart .ff-tea { stroke-width: 3; opacity: 1; }
+.ff-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.75rem; margin-top: 4px; }
+.ff-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.ff-board { list-style: none; margin: 0; padding: 0; font-size: 0.8rem; }
+.ff-board li { display: grid; grid-template-columns: 9.5em 1fr 4.5em; gap: 8px; align-items: center; padding: 2px 0; }
+.ff-board .ff-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ff-board .ff-bar { height: 8px; background: rgba(42, 29, 46, 0.08); border-radius: 4px; overflow: hidden; }
+.ff-board .ff-bar i { display: block; height: 100%; background: #b9a4c9; transition: width 0.18s linear; }
+.ff-board li.bot .ff-bar i { background: var(--amber); }
+.ff-board .ff-num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+.ff-stats { font-size: 0.78rem; color: #6b5a6e; margin: 10px 0; }
+.ff-controls { display: flex; gap: 8px; }
+.ff-controls .small { color: var(--ink); border-color: rgba(0, 0, 0, 0.2); background: rgba(0, 0, 0, 0.04); }
+
 /* ---- phone ---- */
 @media (max-width: 720px) {
   :root { --panel-h: 250px; --hud-h: 150px; }

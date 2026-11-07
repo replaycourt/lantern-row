@@ -6,6 +6,7 @@ import { Scene, drawLogo } from './scene.js'
 import { Sound } from './audio.js'
 import * as L from './logic.js'
 import * as U from './ui.js'
+import { playFastForward } from './fastforward.js'
 
 const EXPLORER = 'https://testnet.nearblocks.io'
 const CODE_HASH = L.WASM_SHA256
@@ -132,6 +133,7 @@ function wireButtons() {
   U.$('btn-deed').addEventListener('click', openDeed)
   U.$('btn-proof').addEventListener('click', openProof)
   U.$('watch').addEventListener('click', () => setWatching(true))
+  U.$('fast-forward').addEventListener('click', openFastForward)
   U.$('watch-play').addEventListener('click', () => setWatching(false))
   U.$('watch-proof').addEventListener('click', openProof)
   U.$('btn-sound').addEventListener('click', () => {
@@ -735,6 +737,17 @@ function freeSpotsAhead() {
   const list = out.slice(0, 2)
   if (best && !list.includes(best)) list.push(best)
   return list
+}
+
+/** The fast-forward sheet: a recorded simulation of 300 nights, played in a minute (fastforward.js). */
+async function openFastForward() {
+  sound.tap()
+  const body = U.openSheet('Fast-forward', '<p class="muted">Loading the recording…</p>')
+  try {
+    await playFastForward(body, { reduced })
+  } catch {
+    body.innerHTML = '<p>The recording could not be loaded.</p>'
+  }
 }
 
 async function openBoard() {
