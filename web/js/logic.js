@@ -864,14 +864,16 @@ export function roughDuration(ms) {
 /**
  * When nobody has played for a while, the night that should have ended is still open: the contract
  * only moves when someone calls `advance_night`. Says so plainly, or returns null when the town is
- * on time (a night a few seconds late is normal: the next client closes it).
+ * on time. The keeper closes overdue nights every few minutes, so a lag shorter than
+ * `IDLE_NOTICE_MS` is the normal rhythm, not a quiet town.
  */
+export const IDLE_NOTICE_MS = 6 * 60_000
 export function idleNotice(world, cfg) {
   if (!world?.due || world.now_ms == null || world.ends_ms == null) return null
   const late = world.now_ms - world.ends_ms
-  if (late < 60000) return null
+  if (late < IDLE_NOTICE_MS) return null
   const most = cfg?.max_catchup_nights ?? 30
-  return `The row has been quiet for ${roughDuration(late)}. The next player to act catches it up, up to ${most} nights at once.`
+  return `The street has been asleep for ${roughDuration(late)}. The first player to act wakes it and catches up, up to ${most} nights at once.`
 }
 
 /**

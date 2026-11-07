@@ -76,8 +76,9 @@ test('the ticker tells a night in sentences, in walking order', () => {
 
 test('an idle town says plainly that the next player catches it up', () => {
   assert.equal(L.idleNotice(world, cfg), null) // 10 s late: normal
+  assert.equal(L.idleNotice({ ...world, now_ms: world.ends_ms + 5 * 60_000 }, cfg), null) // between keeper calls
   const idle = { ...world, now_ms: 990_000 + 19 * 3600_000 }
-  assert.equal(L.idleNotice(idle, cfg), 'The row has been quiet for 19 hours. The next player to act catches it up, up to 30 nights at once.')
+  assert.equal(L.idleNotice(idle, cfg), 'The street has been asleep for 19 hours. The first player to act wakes it and catches up, up to 30 nights at once.')
   assert.equal(L.idleNotice({ ...idle, due: false }, cfg), null)
   assert.equal(L.roughDuration(5 * 60_000), '5 minutes')
   assert.equal(L.roughDuration(60_000), '1 minute')
