@@ -10,7 +10,8 @@
 # RUSTFLAGS only through `--env` and appends `--cfg near` itself, so RUSTFLAGS and
 # CARGO_ENCODED_RUSTFLAGS are unset here (the latter would make cargo drop `--cfg near`).
 # It also pins the host triple that cargo hashes (see "Host pin" below); it sets RUSTC_WRAPPER for
-# that and replaces any wrapper set before.
+# that and replaces any wrapper set before. It unsets every CARGO_NEAR_* and NEP330_* variable
+# (see "cargo-near's own variables" below).
 #
 # The build fails if `strings` finds /Users/, /home/ or the current user name in the wasm.
 # Output: $CARGO_TARGET_DIR/near/lantern_row.wasm (default target/near/lantern_row.wasm).
@@ -50,6 +51,16 @@ FLAGS="$FLAGS --remap-path-prefix=$RUSTUP_HOME_DIR=/rustup"
 FLAGS="$FLAGS --remap-path-prefix=$CARGO_HOME_DIR=/cargo"
 
 unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS
+
+# cargo-near's own variables. cargo-near reads CARGO_NEAR_* and NEP330_* from the environment to pass
+# state into nested builds, and some of it ends up in the wasm: a set CARGO_NEAR_VERSION replaces the
+# `builder` field of the ABI embedded in the wasm (`cargo-near cargo-near-build 0.11.5` in the deployed
+# build), NEP330_LINK the source link of the NEP-330 metadata. A CI job that set CARGO_NEAR_VERSION=0.22.0
+# for its own use built an ABI saying `cargo-near 0.22.0`; the compressed ABI got 8 bytes shorter, every
+# later data address moved, and with them globals and code. None of these is set for this build.
+for v in $(compgen -e); do
+  case "$v" in CARGO_NEAR_*|NEP330_*) unset "$v" ;; esac
+done
 cd "$HERE"
 export CARGO_TARGET_DIR=$TARGET_DIR
 

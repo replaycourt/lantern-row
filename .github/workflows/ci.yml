@@ -49,11 +49,11 @@ jobs:
 
   # Rebuilds the contract from this source and compares the result with the code deployed on the
   # contract account, fetched from the chain in the same job (RPC view_code), not only with the
-  # number in contract/WASM_SHA256. The deployed wasm was built on the author's Intel Mac. Since the
-  # host pin, the three runners below build the same bytes, which still differ from the deployed code;
-  # the cause is open, so every platform reports how its rebuild compares, section by section, without
-  # failing on a difference (see "Rebuilding the deployed wasm" in the docs). Set `required: true` on a
-  # platform once its rebuild matches the chain.
+  # number in contract/WASM_SHA256. The deployed wasm was built on the author's Intel Mac. Every
+  # platform reports how its rebuild compares, section by section; set `required: true` on a platform
+  # once its rebuild matches the chain (see "Rebuilding the deployed wasm" in the docs).
+  # The cargo-near version is in CARGO_NEAR_RELEASE, not CARGO_NEAR_VERSION: cargo-near reads
+  # CARGO_NEAR_VERSION and writes it into the ABI embedded in the wasm (build.sh unsets it as well).
   wasm:
     name: Rebuild the wasm on ${{ matrix.label }} and compare it with the deployed code
     runs-on: ${{ matrix.os }}
@@ -81,7 +81,7 @@ jobs:
             # sha256 of cargo-near-aarch64-apple-darwin.tar.gz from the cargo-near v0.22.0 release
             cargo_near_sha256: 55bd219c28c6996512a7c3836519f160b27b73a723f087634bf16f8a0bd48c8a
     env:
-      CARGO_NEAR_VERSION: 0.22.0
+      CARGO_NEAR_RELEASE: 0.22.0
       CONTRACT_ACCOUNT: lantern-row.testnet
       WASM_NAME: lantern_row.wasm
     steps:
@@ -97,11 +97,11 @@ jobs:
           TOOLCHAIN=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
           rustup toolchain install "$TOOLCHAIN" --profile minimal --component rustfmt,clippy --target wasm32-unknown-unknown
           rustc -vV
-      - name: Install cargo-near ${{ env.CARGO_NEAR_VERSION }} (release binary, checksum pinned)
+      - name: Install cargo-near ${{ env.CARGO_NEAR_RELEASE }} (release binary, checksum pinned)
         run: |
           NAME=${{ matrix.cargo_near_asset }}
           curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/$NAME.tar.gz" \
-            "https://github.com/near/cargo-near/releases/download/cargo-near-v$CARGO_NEAR_VERSION/$NAME.tar.gz"
+            "https://github.com/near/cargo-near/releases/download/cargo-near-v$CARGO_NEAR_RELEASE/$NAME.tar.gz"
           echo "${{ matrix.cargo_near_sha256 }}  $RUNNER_TEMP/$NAME.tar.gz" | shasum -a 256 -c -
           tar -xzf "$RUNNER_TEMP/$NAME.tar.gz" -C "$RUNNER_TEMP"
           mkdir -p "$HOME/.cargo/bin"
