@@ -406,3 +406,13 @@ test('the call is judged by what the night log says', () => {
   assert.equal(storm.met, true)
   assert.match(storm.text, /up from 52 to 80; you bought 5 before, saving about 140/)
 })
+
+test('the takings board ranks one night by what each stall on the row sold', () => {
+  const world = { row: [{ id: 1, name: 'Kettle', npc: true }, { id: 7, name: 'Mine', npc: false, owner: 'ab'.repeat(32) }, { id: 9, name: 'Idle', npc: false, owner: 'cd'.repeat(32) }] }
+  const log = { sales: [[0, 7, 0, 60], [1, 1, 2, 40], [2, 7, 1, 90], [3, 4, 0, 50]], refusals: [[0, 1, 0], [1, 9, 3]] }
+  assert.deepEqual(
+    L.nightTakings(world, log).map((r) => [r.id, r.sales, r.takings, r.refusals]),
+    [[7, 2, 150, 0], [1, 1, 40, 1], [9, 0, 0, 1]],
+  )
+  assert.deepEqual(L.nightTakings(world, null).map((r) => r.takings), [0, 0, 0])
+})
