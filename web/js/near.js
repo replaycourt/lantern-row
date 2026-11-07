@@ -216,6 +216,31 @@ export class Rpc {
     return this.call('query', { request_type: 'view_access_key_list', finality: 'final', account_id: accountId })
   }
 
+  /**
+   * One call to one given host, with no retry and no change of host: for reads of the past, where
+   * an unknown block is an answer about that host's history, not an outage.
+   */
+  async callOn(host, method, params) {
+    this.calls++
+    const r = await this.fetch(host, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: String(this.calls), method, params }),
+      signal: AbortSignal.timeout(this.timeoutMs),
+    })
+    const j = await r.json().catch(() => null)
+    if (j?.error) throw new RpcError(JSON.stringify(j.error), j.error)
+    if (!r.ok || !j) throw new RpcError(`http ${r.status}`, { http: r.status, text: `http ${r.status}` })
+    if (j.result?.error) throw new RpcError(String(j.result.error), { text: j.result.error })
+    return j.result
+  }
+
+  /** A view as it was at a block height, asked of one host. */
+  async viewAt(host, contract, method, args, height) {
+    const r = await this.callOn(host, 'query', { request_type: 'call_function', block_id: height, account_id: contract, method_name: method, args_base64: base64(utf8(JSON.stringify(args))) })
+    return JSON.parse(new TextDecoder().decode(new Uint8Array(r.result)))
+  }
+
   /** An account's balance, storage and code hash (base58; all ones when no code is deployed). */
   async viewAccount(accountId) {
     return this.call('query', { request_type: 'view_account', finality: 'final', account_id: accountId })

@@ -13,7 +13,7 @@
   --radius: 16px;
   --font: ui-rounded, "SF Pro Rounded", "Nunito", "Avenir Next Rounded", "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
   --panel-h: 224px;
-  --hud-h: 102px;
+  --hud-h: 118px;
 }
 
 * { box-sizing: border-box; }
@@ -59,7 +59,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--amber); out
 .watch-info b { color: #ffe08a; font-size: 0.95rem; }
 .watch-info span { font-size: 0.78rem; opacity: 0.8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .takings { display: none; position: absolute; left: 12px; top: 74px; z-index: 9; width: 290px; max-height: calc(100vh - 140px); overflow: auto; background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3); font-size: 0.82rem; }
-body.watching .takings:not(:empty) { display: block; }
+body.watching .takings:has(> div:not(:empty)) { display: block; }
 .takings h3 { margin: 0 0 6px; font-size: 0.85rem; color: #ffe08a; }
 .takings ol { list-style: none; margin: 0; padding: 0; }
 .takings li { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; align-items: baseline; padding: 3px 0; border-top: 1px solid var(--line); }
@@ -69,6 +69,13 @@ body.watching .takings:not(:empty) { display: block; }
 .takings small { font-weight: 400; opacity: 0.7; }
 .takings li.player .who { color: #ffe08a; }
 .takings p { margin: 8px 0 0; font-size: 0.74rem; opacity: 0.75; }
+.takings .cup-watch:not(:empty) { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255, 207, 90, 0.45); }
+.takings #takings-night:empty + .cup-watch { margin-top: 0; padding-top: 0; border-top: 0; }
+.takings h3 small { font-weight: 600; color: var(--cream); opacity: 0.75; }
+.takings li.me .who { color: var(--amber); font-weight: 800; }
+.takings .cup-kind { font-size: 0.7rem; }
+.cup-more { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted rgba(255, 224, 138, 0.6); text-underline-offset: 3px; }
+.cup-more:hover { color: var(--amber); }
 .watch-actions { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
 .watch-actions .small.primary { padding: 12px 18px; font-size: 0.95rem; box-shadow: 0 4px 0 #a24a1e; white-space: nowrap; }
 .ticker { position: absolute; left: 0; right: 0; bottom: 0; z-index: 21; height: 36px; display: flex; align-items: center; background: rgba(10, 8, 30, 0.82); border-top: 1px solid var(--line); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); font-size: 0.84rem; padding-bottom: env(safe-area-inset-bottom); }
@@ -121,6 +128,8 @@ body.watching .toast { bottom: auto; top: 76px; }
 .sub { font-size: 0.78rem; opacity: 0.8; }
 #hud-worth { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 290px; }
 #hud-worth b { color: #ffe08a; }
+.cup-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 290px; }
+.cup-line b { color: var(--amber); }
 .goal { display: grid; gap: 3px; margin: 3px 0 1px; }
 .goal-bar { display: block; height: 5px; border-radius: 3px; background: rgba(255, 220, 170, 0.16); overflow: hidden; }
 .goal-bar i { display: block; height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, var(--ember), var(--amber)); box-shadow: 0 0 8px rgba(255, 207, 90, 0.6); transition: width 0.8s ease; }
@@ -303,6 +312,25 @@ body.watching .toast { bottom: auto; top: 76px; }
 .board .who small { display: block; font-weight: 500; opacity: 0.65; font-size: 0.75rem; }
 .board .worth { font-weight: 800; font-variant-numeric: tabular-nums; }
 
+/* the Lantern Cup, at the top of the Ranks sheet */
+.cup { margin: 4px 0 6px; padding: 2px 12px 10px; border-radius: 14px; background: linear-gradient(170deg, rgba(255, 207, 90, 0.2), rgba(255, 207, 90, 0.06)); border: 1px solid rgba(201, 167, 106, 0.45); }
+.cup h3 { opacity: 0.85; color: #8a3a1e; margin-top: 12px; }
+.cup .cup-lead { margin-top: 0; }
+.cup-board { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 5px; }
+.cup-board li { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; padding: 6px 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.55); }
+.cup-board li:first-child .rank { color: #b0701a; }
+.cup-board li.me { background: var(--amber); font-weight: 800; }
+.cup-board li.cup-gap { display: block; background: none; padding: 0 0 0 14px; line-height: 0.6; opacity: 0.5; }
+.cup-board .rank { font-weight: 800; font-size: 1.05rem; text-align: center; }
+.cup-board .who { font-weight: 700; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cup-board .who em { font-style: normal; font-weight: 600; opacity: 0.7; }
+.cup-board .who small { display: block; font-weight: 500; opacity: 0.65; font-size: 0.75rem; }
+.cup-board .who .cup-kind { display: inline; font-size: 0.7rem; }
+.cup-board .num { font-weight: 800; font-variant-numeric: tabular-nums; }
+.cup-board .num small { font-weight: 500; opacity: 0.65; }
+.cup .cup-last { font-size: 0.85rem; }
+.cup .cup-how { margin-bottom: 0; }
+
 /* proof */
 .proof-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; font-size: 0.85rem; }
 .proof-list li { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: baseline; }
@@ -359,7 +387,7 @@ body.watching .toast { bottom: auto; top: 76px; }
 
 /* ---- phone ---- */
 @media (max-width: 720px) {
-  :root { --panel-h: 250px; --hud-h: 150px; }
+  :root { --panel-h: 250px; --hud-h: 166px; }
   #hud { grid-template-columns: 1fr auto; grid-template-rows: auto auto; padding: 8px; gap: 6px; height: auto; }
   .chip { padding: 6px 10px; }
   .stall-chip .sub { font-size: 0.7rem; }
@@ -393,6 +421,8 @@ body.watching .toast { bottom: auto; top: 76px; }
   .good .price .why-short { display: block; }
   #hud-worth { max-width: 100%; }
   #hud-worth .next { display: none; }
+  .cup-line { max-width: 100%; }
+  .cup-line .cup-score { display: none; }
   .goal-text { font-size: 0.7rem; }
   .steps { gap: 5px; }
   .steps li { flex-direction: column; text-align: center; gap: 3px; padding: 6px 6px; flex: 1; }
@@ -404,7 +434,7 @@ body.watching .toast { bottom: auto; top: 76px; }
   .watch-actions .small.primary { padding: 10px 12px; font-size: 0.85rem; }
   .watchbar { padding: 8px; gap: 6px; }
   .takings { top: 64px; left: 8px; width: min(250px, 66vw); font-size: 0.74rem; padding: 8px 10px; }
-  .takings li:nth-child(n + 5), .takings p { display: none; }
+  #takings-night li:nth-child(n + 5), .takings p { display: none; }
   .watch-info { padding: 6px 10px; }
   .watch-info b { font-size: 0.85rem; }
   .ticker { font-size: 0.76rem; height: 32px; }

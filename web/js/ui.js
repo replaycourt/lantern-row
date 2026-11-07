@@ -1,7 +1,7 @@
 // DOM side of the client: the HUD, the goods counter, hints, the night summary, sheets, toasts.
 // Everything that comes from the chain goes through escapeHtml before it touches innerHTML.
 import { houseBot, isHouseBot } from './house-bots.js'
-import { GOOD_SHORT, escapeHtml as esc, fmt, shortAccount, eventInfo, bannerText, spotLabel, priceNote, rankGroups, standingText } from './logic.js'
+import { GOOD_SHORT, escapeHtml as esc, fmt, shortAccount, eventInfo, bannerText, spotLabel, priceNote, rankGroups, standingText, cupScore, cupTimeLeft } from './logic.js'
 
 export const $ = (id) => document.getElementById(id)
 
@@ -301,6 +301,53 @@ export function takingsHtml(rows, night) {
     .map((r, i) => `<li class="${kind(r)}"><span class="rank">${i + 1}</span><span class="who">${esc(r.name)}${r.bot ? ' ' + botTag() : r.npc ? ' <small>merchant</small>' : ''}</span><span class="num">${r.sales ? `${fmt(r.takings)}<small> · ${fmt(r.sales)} sold</small>` : '<small>no sale</small>'}</span></li>`)
     .join('')
   return `<h3>Night ${fmt(night)}: takings</h3><ol>${items}</ol><p>Takings, not wealth: a new stall can top this list on its first night.</p>`
+}
+
+// ---- the Lantern Cup ------------------------------------------------------------------------------
+
+const clockTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+/**
+ * The cup's standings as HTML. `cup` is {rows, start, end, left, live, since, height, last}: rows from
+ * cupStandings, the hour (cupHour), whether the start is a stand-in read when the page opened
+ * (`live`, at `since`) or the hour's first block (`height`), and last hour's result {start, winner}.
+ * `compact` is the watch view's short board; without it, the Ranks sheet's full one.
+ */
+export function cupHtml(cup, { myId = null, compact = false } = {}) {
+  if (!cup?.rows) return `<h3>Lantern Cup</h3><p class="muted">Reading the hour's first block from the chain…</p>`
+  const top = cup.rows.filter((r) => r.place != null).slice(0, compact ? 3 : 5)
+  const mine = cup.rows.find((r) => r.id === myId)
+  const tag = (r) => (r.bot ? ' ' + botTag() : r.npc ? ' <small class="cup-kind">merchant</small>' : '')
+  const kind = (r) => (r.id === myId ? 'me' : r.npc ? 'npc' : r.bot ? 'bot' : 'player')
+  const item = (r) =>
+    `<li class="${kind(r)}"><span class="rank">${r.place ?? '–'}</span><span class="who">${esc(r.name)}${r.id === myId ? ' <em>(you)</em>' : ''}${tag(r)}${compact ? '' : `<small>took ${fmt(r.takings)} on ${fmt(r.stake)} · ${fmt(r.sales)} sale${r.sales === 1 ? '' : 's'}</small>`}</span><span class="num">${r.place != null ? cupScore(r.score) : '<small>no sale yet</small>'}</span></li>`
+  const extra = mine && !top.includes(mine) ? `<li class="cup-gap" aria-hidden="true">…</li>${item(mine)}` : ''
+  const ol = compact ? '<ol class="cup-mini">' : '<ol class="cup-board">'
+  const list = top.length ? `${ol}${top.map(item).join('')}${extra}</ol>` : `<p>No stall has sold anything this hour yet. The first sale leads.</p>${mine ? `${ol}${item(mine)}</ol>` : ''}`
+  const left = cupTimeLeft(cup.left)
+  if (compact) return `<h3><button class="cup-more" type="button" data-cup-more>Lantern Cup <span aria-hidden="true">›</span></button> <small>· ${esc(left)}</small></h3>${list}<p>This hour's takings per coin of worth: a new stall can win it.</p>`
+  const last = cup.last?.winner
+    ? `<p class="cup-last">Last hour's cup (${esc(clockTime(cup.last.start))}–${esc(clockTime(cup.last.start + 3_600_000))}) went to <b>${esc(cup.last.winner.name)}</b>${cup.last.winner.id === myId ? ' <em>(you)</em>' : ''}${tag(cup.last.winner)} with ${cupScore(cup.last.winner.score)}.</p>`
+    : ''
+  const from = cup.pending
+    ? `Reading the hour's first block from the chain; until it answers, this counts from ${esc(clockTime(cup.since))}, when this page opened.`
+    : cup.live
+    ? `The chain's history was out of reach, so this race counts from ${esc(clockTime(cup.since))}, when this page opened: every stall then, and now.`
+    : `The page reads every stall from the chain twice: at the hour's first block (#${fmt(cup.height)}, ${esc(clockTime(cup.since))}) and now.`
+  return `<section class="cup" data-cup>
+    <h3>Lantern Cup · ${esc(clockTime(cup.start))}–${esc(clockTime(cup.end))}</h3>
+    <p class="cup-lead">A new race every hour, <b>${esc(left)}</b>. It counts takings sized to the stall, so a new stall can beat the merchants.</p>
+    ${list}${last}
+    <p class="muted cup-how">${from} Each stall's score is what it took in between, divided by what it was worth at the start, counted as at least ${fmt(cup.floor ?? 3000)} (a new stall's grant). Merchants and house bots race too.</p>
+  </section>`
+}
+
+/** The HUD's cup line, from cupLine: "Cup #2 of 9 · ×1.40 · 23 min left". Hidden without one. */
+export function renderCupHud(line) {
+  const el = $('hud-cup')
+  el.classList.toggle('hidden', !line)
+  if (!line) return
+  el.innerHTML = `<b>${esc(line.place)}</b>${line.score ? `<span class="cup-score"> · ${esc(line.score)}</span>` : ''}<span> · ${esc(line.left)}</span>`
 }
 
 export function botTag() {

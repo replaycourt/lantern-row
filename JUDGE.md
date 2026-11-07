@@ -66,6 +66,7 @@ The [README](README.md#how-to-play) walks through the same steps with more detai
 | No-wallet play | browser key: `loadOrCreateIdentity` in `web/js/chain.js`; signing: `Client.act` in `web/js/chain.js`; relay: `GasPool.relay` in `web/js/chain.js`; signature check: `act` in `contract/src/lib.rs` | `contract/tests/signature.rs`, `web/test/near.test.mjs` |
 | The client reads villagers as the contract does | `villagerWants`, `forecast`, `titleLine`, `refusalReason` in `web/js/logic.js` | `web/test/logic.test.mjs`, `web/test/goals.test.mjs` |
 | Watching the row sends nothing | `startReplay`, `pollTitle` in `web/js/main.js`: views and `night_log` only | |
+| The hourly Lantern Cup, which a new stall can win, comes from the chain alone: the `stalls` view at the hour's first block and the live row | `findBlockAt`, `cupStandings` in `web/js/logic.js`; `stallsAt` in `web/js/chain.js` | `web/test/cup.test.mjs` |
 
 Every rule and number is in [SPEC.md](SPEC.md); the economy simulation is in [docs/ECONOMY.md](docs/ECONOMY.md); the last end-to-end run on testnet, with its transaction hashes, is in [docs/testnet-run.md](docs/testnet-run.md).
 

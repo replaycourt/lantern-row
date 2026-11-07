@@ -3,7 +3,7 @@
 // promises that resolve to game outcomes, and friendly errors when the network is in a mood.
 import { Rpc, RpcError, b58decode, encodeTx, functionCallAction, hex, implicitAccount, keyFromNearString, keyFromSeed, newKey, nearPublicKey, sign, signTx, sleep, summarise, txHash, unhex, utf8 } from './near.js'
 import { CONTRACT, GAS_ACCOUNT, GAS_KEYS, RPC_HOSTS } from './gas-keys.js'
-import { coalesce, signingText } from './logic.js'
+import { coalesce, findBlockAt, signingText } from './logic.js'
 
 const STORE_KEY = 'lantern-row:key:v1'
 const ACT_GAS = 20_000_000_000_000n
@@ -195,6 +195,36 @@ export class Client {
   }
   dockQuote(good, qty) {
     return this.view('dock_quote', { good, qty })
+  }
+
+  /**
+   * Every stall as it was when an hour began, for the Lantern Cup: the first block at or after `ms`
+   * (chain time), found by height with a few `block` headers, then the `stalls` view at that block.
+   * Asks each RPC host in turn, the one in use first; null when none keeps that much history or the
+   * hour's first block is not final yet. {height, ms, stalls, minted}
+   */
+  async stallsAt(ms) {
+    const rpc = this.rpc
+    for (const host of [rpc.host, ...rpc.hosts.filter((h) => h !== rpc.host)]) {
+      try {
+        const header = async (block_id) => {
+          const h = (await rpc.callOn(host, 'block', block_id == null ? { finality: 'final' } : { block_id })).header
+          return { height: h.height, ms: Math.floor(h.timestamp / 1e6) }
+        }
+        const block = await findBlockAt(ms, await header(null), header)
+        if (!block) return null
+        const stalls = []
+        for (let from = 1; ; from += 120) {
+          const page = await rpc.viewAt(host, this.contract, 'stalls', { from, limit: 120 }, block.height)
+          stalls.push(...page)
+          if (page.length < 120) break
+        }
+        return { ...block, stalls, minted: stalls.reduce((m, s) => Math.max(m, s.id), 0) }
+      } catch (e) {
+        console.info('cup history', new URL(host).host, String(e?.message ?? e).slice(0, 160))
+      }
+    }
+    return null
   }
 
   /**

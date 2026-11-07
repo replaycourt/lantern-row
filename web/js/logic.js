@@ -1114,3 +1114,112 @@ export function proofFacts({ keyCount, codeHashHex, expected = WASM_SHA256 }) {
   const code = !codeHashHex ? { ok: null, text: 'could not be read just now' } : codeHashHex === expected ? { ok: true, text: `${short(codeHashHex)}, the same as contract/WASM_SHA256 (read live)` } : { ok: false, text: `${short(codeHashHex)} on chain, but contract/WASM_SHA256 says ${short(expected)}` }
   return { keys, code }
 }
+
+// ---- the Lantern Cup: an hourly race a new stall can win -----------------------------------------
+
+export const CUP_HOUR_MS = 3_600_000
+
+/** The cup's hour: the clock hour (UTC) that holds `nowMs`, chain time. {start, end, left} in ms. */
+export function cupHour(nowMs) {
+  const start = Math.floor(nowMs / CUP_HOUR_MS) * CUP_HOUR_MS
+  return { start, end: start + CUP_HOUR_MS, left: Math.max(0, start + CUP_HOUR_MS - nowMs) }
+}
+
+/**
+ * Finds the block where an hour began: the first block at or after `targetMs`, or one at most
+ * `slack` ms later. Guesses a height from the chain's pace, reads that block's header, corrects the
+ * pace from the two points, and guesses again. `head` is a recent block {height, ms}; `header(h)`
+ * resolves to {height, ms} or rejects for a height with no block (heights can be skipped), in which
+ * case the next height is read. Resolves to {height, ms}, or null when the target is still ahead of
+ * `head` or the search did not settle. Rejects when no block near a guess can be read (history gone).
+ */
+export async function findBlockAt(targetMs, head, header, { pace = 600, slack = 1500, tries = 7 } = {}) {
+  if (!head || head.ms < targetMs) return null
+  if (head.ms - targetMs <= slack) return head
+  const read = async (h) => {
+    let err
+    for (let k = 0; k < 3; k++) {
+      try {
+        return await header(h + k)
+      } catch (e) {
+        err = e
+      }
+    }
+    throw err
+  }
+  let known = head
+  for (let i = 0; i < tries; i++) {
+    const gap = (known.ms - targetMs) / pace // blocks to go back; negative: forward
+    const step = gap > 0 ? Math.max(1, Math.floor(gap)) : Math.min(-1, Math.floor(gap))
+    const b = await read(known.height - step)
+    if (b.ms >= targetMs && b.ms - targetMs <= slack) return b
+    const dh = known.height - b.height
+    if (Math.abs(dh) >= 5) pace = Math.min(5000, Math.max(100, (known.ms - b.ms) / dh))
+    known = b
+  }
+  return null
+}
+
+/**
+ * The Lantern Cup standings. Merchants hold 13 to 22 times a new stall's coin and take in 60,000 to
+ * 110,000 an hour against the best small stall's 13,000 (testnet, November 2026), so raw takings
+ * would crown a merchant every hour. The cup sizes takings to the stall instead: `score` is what a
+ * stall took in since the hour began (the rise of its `revenue`, which only ever grows), for each
+ * coin it was worth when the hour began, counted as at least `floor` (the starter grant). A stall
+ * opened during the hour counts from zero takings and the floor.
+ * `row`: stall views now, only those with a spot race. `base`: {stalls, minted} at the hour's first
+ * block; a stall the base should hold but does not (its id is not above `minted`) is left out, as
+ * its start is unknown. Best first: {id, name, npc, owner, bot, takings, sales, stake, score, place};
+ * `place` is null for a stall with no takings yet.
+ */
+export function cupStandings(row, base, { floor = 3000 } = {}) {
+  const then = new Map((base?.stalls ?? []).map((s) => [s.id, s]))
+  const minted = base?.minted ?? Math.max(0, ...then.keys())
+  const rows = []
+  for (const s of row ?? []) {
+    if (s.spot == null) continue
+    const b = then.get(s.id)
+    if (!b && s.id <= minted) continue
+    const takings = Math.max(0, s.revenue - (b?.revenue ?? 0))
+    const sales = Math.max(0, s.customers - (b?.customers ?? 0))
+    const stake = Math.max(floor, b?.worth ?? 0, 1)
+    rows.push({ id: s.id, name: s.name, npc: !!s.npc, owner: s.owner, bot: isHouseBot(s), takings, sales, stake, score: takings / stake })
+  }
+  rows.sort((a, b) => b.score - a.score || b.takings - a.takings || a.id - b.id)
+  let place = 0
+  for (const r of rows) r.place = r.takings > 0 ? ++place : null
+  return rows
+}
+
+/** A cup score as a multiple of the stake: "×2.25", "×14.3". */
+export function cupScore(score) {
+  return `×${score >= 10 ? score.toFixed(1) : score.toFixed(2)}`
+}
+
+/** "23 min left", "under a minute left". */
+export function cupTimeLeft(ms) {
+  const min = Math.floor(ms / 60000)
+  return min < 1 ? 'under a minute left' : `${min} min left`
+}
+
+/**
+ * The HUD's cup line for one stall: {place: "Cup #2 of 9", score: "×1.40", left: "23 min left"};
+ * without a sale yet {place: "Cup: no sale yet", score: null, left}. `rows` from cupStandings.
+ */
+export function cupLine(rows, myId, leftMs) {
+  if (!rows) return null
+  const me = rows.find((r) => r.id === myId)
+  const left = cupTimeLeft(leftMs)
+  if (!me) return { place: 'Cup: off the row', score: null, left }
+  if (me.place == null) return { place: 'Cup: no sale yet', score: null, left }
+  const placed = rows.filter((r) => r.place != null).length
+  return { place: `Cup #${me.place} of ${placed}`, score: cupScore(me.score), left }
+}
+
+/**
+ * The winner of a finished hour: the stall in first place, or null when nobody sold. {winner, mine}.
+ */
+export function cupWinner(rows, myId = null) {
+  const winner = rows?.find((r) => r.place === 1) ?? null
+  return winner ? { winner, mine: winner.id === myId } : null
+}

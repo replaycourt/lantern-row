@@ -47,6 +47,11 @@ const S = {
 // Watching the row: the title street replays the latest nights from the chain's own night logs.
 // Read-only: views only, never a transaction, never advance_night.
 const W = { on: false, token: 0, logs: new Map(), cycle: [], next: 0, pollTimer: null, watching: false }
+// The Lantern Cup (cupStandings in logic.js): an hourly race on the row by takings sized to the stall.
+// Where the hour began is read from the chain once an hour (the hour's first block); the standings
+// come from the world view the page polls anyway. `base` is {start, height, ms, stalls, minted, live};
+// `live` marks a stand-in read from this page's own view, used until (or if) the chain's history answers.
+const CUP = { base: null, prev: null, last: null, rows: null, loading: false, tryAt: 0, fails: 0, told: 0 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const client = new Client()
@@ -104,6 +109,7 @@ async function boot() {
     S.goals = L.milestones(cfg)
     U.setIdle(L.idleNotice(world, cfg))
     startReplay()
+    cupTick()
   } catch (e) {
     console.error(e)
     U.$('title-line').textContent = 'The street is out of reach right now.'
@@ -136,6 +142,7 @@ function wireButtons() {
   U.$('fast-forward').addEventListener('click', openFastForward)
   U.$('watch-play').addEventListener('click', () => setWatching(false))
   U.$('watch-proof').addEventListener('click', openProof)
+  U.$('cup-watch').addEventListener('click', (e) => e.target.closest('[data-cup-more]') && openCup())
   U.$('btn-sound').addEventListener('click', () => {
     sound.enable()
     sound.setMuted(!sound.muted)
@@ -303,6 +310,7 @@ async function poll() {
     pollCount++
     if (!queue.busy && pollCount % 2 === 0) await refreshMe()
     if (pollCount % 6 === 1) await refreshBoard()
+    cupTick()
     if (!S.walking) U.setStatus(queue.busy ? 'busy' : '', queue.busy ? 'Stamping your order…' : 'Ready')
   } catch (e) {
     S.failures++
@@ -752,14 +760,23 @@ async function openFastForward() {
 
 async function openBoard() {
   sound.tap()
-  U.openSheet('Leaderboard', '<p class="muted">Fetching the ranks…</p>')
+  cupTick()
+  const cup = () => `<div data-cup-slot>${U.cupHtml(cupNow(), { myId: S.stall.id })}</div>`
+  U.openSheet('Leaderboard', `${cup()}<p class="muted">Fetching the ranks…</p>`)
   try {
     const board = await client.leaderboard(120)
     setBoard(board)
-    U.openSheet('Leaderboard', U.boardHtml(board, S.stall.id))
+    U.openSheet('Leaderboard', cup() + U.boardHtml(board, S.stall.id))
   } catch {
-    U.openSheet('Leaderboard', '<p>The ranks are out of reach right now.</p>')
+    U.openSheet('Leaderboard', `${cup()}<p>The ranks are out of reach right now.</p>`)
   }
+}
+
+/** The whole cup, from the watch view: the standings, last hour's winner and how it is computed. */
+function openCup() {
+  sound.tap()
+  cupTick()
+  U.openSheet('Lantern Cup', `<div data-cup-slot>${U.cupHtml(cupNow(), { myId: myStallId() })}</div>`)
 }
 
 function openProof() {
@@ -794,6 +811,95 @@ function onTapStall(id, e) {
       U.toast(`Buying ${stall.name} for ${L.fmt(stall.listed)}. Its coin and goods come with it.`, 'ok')
     },
   })
+}
+
+// ---- the Lantern Cup ------------------------------------------------------------------------------
+
+/** Chain time now, from the clock offset of the latest world view (as the night clock uses). */
+function chainNow() {
+  return Date.now() + Math.max(S.clockOffset, S.bestOffset - 5000)
+}
+
+/** The stall this page belongs to, in the game or (for a returning player) while watching. */
+const myStallId = () => S.stall?.id ?? S.me?.stalls?.[0]?.id ?? null
+
+/** Called from every poll: keeps the hour's start read, then redraws the cup wherever it shows. */
+function cupTick() {
+  if (!S.world || !S.cfg) return
+  loadCupBase().catch((e) => console.info('cup', e?.message))
+  renderCup()
+}
+
+/**
+ * Reads the stalls as they were at the hour's first block, once an hour; until that answers, and
+ * if the chain's history is out of reach, the race counts from this page's own first view of the
+ * hour. A failed read is tried again after a minute, three times an hour at most.
+ */
+async function loadCupBase() {
+  const hour = L.cupHour(chainNow())
+  if (CUP.base?.start === hour.start && (!CUP.base.live || CUP.fails >= 3 || Date.now() < CUP.tryAt)) return
+  if (CUP.loading) return
+  if (CUP.base && CUP.base.start !== hour.start) {
+    // The hour turned with the page open: the old start becomes last hour's, and the new one stands in
+    // from the view the page already has until the chain's first block of the hour is final.
+    CUP.prev = !CUP.base.live && CUP.base.start === hour.start - L.CUP_HOUR_MS ? CUP.base : null
+    CUP.base = null
+    CUP.fails = 0
+  }
+  if (!CUP.base) CUP.base = { start: hour.start, ms: S.world.now_ms, stalls: S.world.row, minted: S.world.stalls_total, live: true }
+  CUP.loading = true
+  CUP.tryAt = Date.now() + 60_000
+  try {
+    const at = await client.stallsAt(hour.start)
+    if (CUP.base.start !== hour.start) return
+    if (!at) {
+      CUP.fails++
+      return
+    }
+    CUP.base = { start: hour.start, ...at, live: false }
+    const prev = CUP.prev?.start === hour.start - L.CUP_HOUR_MS ? CUP.prev : await client.stallsAt(hour.start - L.CUP_HOUR_MS)
+    if (prev) {
+      const rows = L.cupStandings(at.stalls, prev, { floor: S.cfg.starter_grant })
+      CUP.last = { start: prev.start ?? hour.start - L.CUP_HOUR_MS, ...L.cupWinner(rows, myStallId()) }
+      // Won with the page open: say so once.
+      if (CUP.prev && CUP.last.mine && S.started && CUP.told !== CUP.last.start) {
+        CUP.told = CUP.last.start
+        U.toast(`${CUP.last.winner.name} won the Lantern Cup for the last hour, ${L.cupScore(CUP.last.winner.score)}. A new race has begun.`, 'ok', 8000)
+        sound.fanfare()
+        scene.celebrate((S.stall?.spot ?? 0) * 210)
+      }
+    }
+    CUP.prev = null
+  } finally {
+    CUP.loading = false
+    renderCup()
+  }
+}
+
+/** The cup as the board functions draw it, or null before its start is known. */
+function cupNow() {
+  if (!CUP.base || !S.world) return null
+  const hour = L.cupHour(chainNow())
+  if (CUP.base.start !== hour.start) return null
+  CUP.rows = L.cupStandings(S.world.row, CUP.base, { floor: S.cfg.starter_grant })
+  const base = CUP.base
+  return { rows: CUP.rows, ...hour, live: base.live, pending: base.live && CUP.fails < 3, since: base.ms, height: base.height, last: CUP.last, floor: S.cfg.starter_grant }
+}
+
+/** Sets an element's HTML only when it changed, so a poll does not redraw a board under a finger. */
+const shownHtml = new WeakMap()
+function setHtml(el, html) {
+  if (!el || shownHtml.get(el) === html) return
+  shownHtml.set(el, html)
+  el.innerHTML = html
+}
+
+function renderCup() {
+  const cup = cupNow()
+  if (!cup) return
+  if (S.started) U.renderCupHud(L.cupLine(cup.rows, S.stall?.id, cup.left))
+  if (W.on) setHtml(U.$('cup-watch'), U.cupHtml(cup, { myId: myStallId(), compact: true }))
+  if (U.sheetOpen()) setHtml(document.querySelector('[data-cup-slot]'), U.cupHtml(cup, { myId: myStallId() }))
 }
 
 // ---- render -------------------------------------------------------------------------------------
@@ -871,7 +977,7 @@ function startReplay() {
         continue
       }
       U.$('watch-line').textContent = `Replaying night ${L.fmt(log.night)} from the chain · tap a stall to see its prices`
-      U.$('takings').innerHTML = U.takingsHtml(L.nightTakings(S.world, log), log.night)
+      U.$('takings-night').innerHTML = U.takingsHtml(L.nightTakings(S.world, log), log.night)
       await scene.playNight(log, { duration: reduced ? 6 : 22, reasonFor: reasonsFor(log, S.world) })
       if (!W.on || W.token !== token) break
       await sleep(1200)
@@ -926,6 +1032,7 @@ async function pollTitle() {
       renderTicker()
     } else applyWorld(world)
     U.setIdle(L.idleNotice(world, S.cfg))
+    cupTick()
   } catch {
     /* try again later */
   }
@@ -986,6 +1093,6 @@ function tutorial() {
 }
 
 // Expose a little for the end-to-end test; it reads, never writes.
-globalThis.__lantern = { state: S, client }
+globalThis.__lantern = { state: S, client, cup: CUP }
 
 boot()
