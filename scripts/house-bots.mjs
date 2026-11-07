@@ -32,7 +32,10 @@ import { GOOD_SHORT, affordable, dockCost, validName } from '../web/js/logic.js'
 const ACT_GAS = 20_000_000_000_000n // SPEC 12.1; measured 2.6 to 3.8 Tgas
 const KEEPER_GAS = 30_000_000_000_000n // measured worst case: 15.4 Tgas for 30 nights on a full row
 const KEEPER_GAS_RETRY = 100_000_000_000_000n
-const RESERVE_COIN = 600 // never spend below this (the rent floor is 500)
+// Never spend below this. Rent never takes the last 500 coins and no rule evicts a stall for being
+// poor, so a reserve above that floor stranded broke bots with no stock and no way to restock. It
+// stays above the player relief threshold (100), so the bots never draw Treasury relief.
+export const RESERVE_COIN = 150
 const SPEND_PCT = 30 // at most this share of the stall's coin on one good per visit
 const DOCK_LEAVE_PCT = 25 // leave at least this share of what the Dock has left of a good tonight
 const KEEP_ALIVE_NIGHTS = 30 // act even with nothing to change once the last action is this old

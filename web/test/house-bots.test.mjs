@@ -6,7 +6,7 @@ import crypto from 'node:crypto'
 import { HOUSE_BOTS, houseBot, isHouseBot } from '../js/house-bots.js'
 import * as L from '../js/logic.js'
 import * as U from '../js/ui.js'
-import { STRATEGIES, dailyCost, describe, loadBots, main, planTurn } from '../../scripts/house-bots.mjs'
+import { RESERVE_COIN, STRATEGIES, dailyCost, describe, loadBots, main, planTurn } from '../../scripts/house-bots.mjs'
 
 const goods = [
   { name: 'tea', fair: 60, dock_base: 30, heat_slope: 120, max_price: 600 },
@@ -104,9 +104,17 @@ test('every strategy plans a valid visit: prices in bounds, a margin, a quarter 
         spent += cost
       }
     }
-    assert.ok(stall.money - spent >= 600, `${id} keeps a reserve`)
+    assert.ok(stall.money - spent >= RESERVE_COIN, `${id} keeps a reserve`)
     assert.equal(acts.findIndex((a) => a.buy) === -1 || acts.slice(acts.findIndex((a) => a.buy)).every((a) => a.buy), true, 'prices go before purchases')
   }
+})
+
+test('a broke bot at the rent floor with no stock restocks instead of idling', () => {
+  const stall = botStall({ money: 500, worth: 500 })
+  const acts = planTurn('restocker', stall, world([kettle, honey, stall]), cfg)
+  const spent = acts.filter((a) => a.buy).reduce((sum, a) => sum + L.dockCost(goods[a.buy.good], dock[a.buy.good], a.buy.qty), 0)
+  assert.ok(spent > 0, 'buys stock')
+  assert.ok(stall.money - spent >= RESERVE_COIN, 'keeps the reserve')
 })
 
 test('the strategies price the way their rules say', () => {
