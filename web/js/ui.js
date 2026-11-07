@@ -245,7 +245,7 @@ export function deedHtml({ stall, token, cfg, account, royaltyPct, freeSpots }) 
   const shelf = cfg.goods
     .map((good, g) => `<span class="deed-good${stall.stock[g] ? '' : ' none'}" title="${esc(good.name)}">${ICONS[g]}<b>${fmt(stall.stock[g])}</b></span>`)
     .join('')
-  const place = stall.spot == null ? 'off the row' : `spot ${stall.spot} of 0–23 · ${stall.footfall ?? 0}% walk by`
+  const place = stall.spot == null ? 'off the row' : `spot ${stall.spot} from the gate · ${stall.footfall ?? 0}% walk by`
   return `
     <div class="deed-card${frozen ? ' for-sale' : ''}">
       <div class="deed-scene-wrap"><canvas class="deed-scene" id="deed-scene" aria-label="${esc(stall.name)} on the row at night" role="img"></canvas>
