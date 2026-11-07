@@ -6,7 +6,7 @@
 // function-call keys below.
 //
 // Each key may ONLY call `act` and `advance_night` on `lantern-row.testnet`, and each has a capped
-// allowance (1 NEAR, about 3,000 transactions). It cannot move NEAR, cannot touch any other contract
+// allowance (2 NEAR, about 6,000 transactions). It cannot move NEAR, cannot touch any other contract
 // and cannot change any game state: `act` checks the player's own signature, so a key holder can only
 // relay what a player already signed. The worst anyone can do with these keys is burn the allowance,
 // which stops free play until the pool is refilled. This is testnet; nothing here has value.

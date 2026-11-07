@@ -17,9 +17,14 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 EXPECTED_HASH=$(tr -d '[:space:]' <"$HERE/../contract/WASM_SHA256")
 
 FAILED=0
+FALLBACK_RPC=${FALLBACK_RPC:-https://near-testnet.drpc.org}
+# --fail keeps an HTTP error page (FastNEAR answers 429 to a quick burst of calls) out of the output,
+# so a retry cannot append a second answer to the first; when the RPC keeps refusing, the fallback
+# answers instead.
 query() { # $1: JSON params of a `query` call
-  curl -s --max-time 20 --retry 2 "$RPC" -H 'Content-Type: application/json' \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"query\",\"params\":$1}"
+  local body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"query\",\"params\":$1}"
+  curl -sf --max-time 20 --retry 3 --retry-delay 2 "$RPC" -H 'Content-Type: application/json' -d "$body" ||
+    curl -sf --max-time 20 --retry 2 --retry-delay 2 "$FALLBACK_RPC" -H 'Content-Type: application/json' -d "$body"
 }
 view() { # $1: method, $2: base64 of the JSON args
   query "{\"request_type\":\"call_function\",\"finality\":\"final\",\"account_id\":\"$CONTRACT\",\"method_name\":\"$1\",\"args_base64\":\"$2\"}"

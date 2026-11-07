@@ -20,7 +20,7 @@ Everything here is NEAR testnet. Look up any transaction at `https://testnet.nea
 
 ## Gas keys
 
-Each of the 14 function-call keys on `lantern-row-gas.testnet` has an allowance of 1 NEAR and may only call `act` and `advance_night` on `lantern-row.testnet`. To see them:
+Each of the 14 function-call keys on `lantern-row-gas.testnet` has an allowance of 2 NEAR (1 NEAR at launch, raised on 2026-11-07 so the pool lasts past the judging) and may only call `act` and `advance_night` on `lantern-row.testnet`. To see them:
 
 ```sh
 near account list-keys lantern-row-gas.testnet network-config testnet now
