@@ -1,0 +1,46 @@
+# Watches the live Lantern Row demo once an hour, so that it stays playable through judging and any
+# breakage reaches the owner: a failed run is what GitHub emails about. scripts/watch.py checks
+# the read-only checks of scripts/judge-checks.sh (no access keys on lantern-row.testnet, code hash
+# = contract/WASM_SHA256, ...), the gas account's balance and relay key allowance with the days they
+# last, that nights keep ending, and that the Town workflow (house bots and keeper) is running.
+# Every problem is one ::error:: line, and the job summary shows the table either way.
+#
+# Read-only: it sends no transaction, holds no key and reads no secret; the default token only
+# lists the Town workflow's runs. The thresholds are below; a gas runway that ends before judging
+# does is a warning in the summary, not a failure.
+name: Watch
+
+on:
+  schedule:
+    - cron: '53 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  RPC: https://test.rpc.fastnear.com
+  RPC_FALLBACK: https://near-testnet.drpc.org
+  JUDGING_ENDS: '2026-11-25'   # a warning when the gas would not last past this day
+  MIN_GAS_NEAR: '5'            # NEAR lantern-row-gas.testnet can still spend
+  BOTS_FLOOR_NEAR: '3'         # the house bots stop below this balance (house-bots.mjs --floor)
+  MIN_ALLOWANCE_NEAR: '5'      # NEAR on the relay keys, together (bots skip keys under 0.2 NEAR)
+  BURN_NEAR_PER_DAY: '0.5'     # assumed burn when the RPC cannot tell the last 20 hours' burn
+  MAX_NIGHT_AGE_MIN: '30'      # minutes since the last night ended
+  MAX_BOTS_IDLE_MIN: '90'      # minutes without a Town run in progress
+
+jobs:
+  watch:
+    name: Watch the row
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # No install: the script needs only python3, bash and curl, all on the runner.
+      - name: Check the live demo
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/watch.py
