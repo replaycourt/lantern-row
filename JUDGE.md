@@ -21,7 +21,8 @@ curl -s https://test.rpc.fastnear.com -H 'Content-Type: application/json' -d '{"
 # Expect: {"founding":1000000,"total":1000000,...} (the other fields say where the coin sits now)
 curl -s https://test.rpc.fastnear.com -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"call_function","finality":"final","account_id":"lantern-row.testnet","method_name":"audit","args_base64":"e30="}}' | python3 -c 'import json,sys; print(bytes(json.load(sys.stdin)["result"]["result"]).decode())'
 
-# The deployed code is the build in this repository.
+# The deployed code is the wasm whose sha256 this repository records (contract/WASM_SHA256).
+# That this is the build of the source is shown by the rebuild below, not by this check.
 # Expect: two equal lines (the chain's code hash in hex, then contract/WASM_SHA256). Run from the repository root.
 curl -s https://test.rpc.fastnear.com -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_account","finality":"final","account_id":"lantern-row.testnet"}}' | python3 -c 'import json,sys,functools; s=json.load(sys.stdin)["result"]["code_hash"]; a="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"; print(functools.reduce(lambda n,c: n*58+a.index(c), s, 0).to_bytes(32,"big").hex())'; cat contract/WASM_SHA256
 
@@ -34,7 +35,7 @@ curl -s https://test.rpc.fastnear.com -H 'Content-Type: application/json' -d '{"
 curl -s https://test.rpc.fastnear.com -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_access_key_list","finality":"final","account_id":"lantern-row-gas.testnet"}}' | python3 -c 'import json,sys,collections; f=lambda p: "full access" if p=="FullAccess" else p["FunctionCall"]["receiver_id"]+" "+",".join(p["FunctionCall"]["method_names"]); print(dict(collections.Counter(f(k["access_key"]["permission"]) for k in json.load(sys.stdin)["result"]["keys"])))'
 ```
 
-The one full-access key is on the gas account, not on the game: it adds relay keys and refills the pool, and it is not in the repository. `contract/build.sh --check` rebuilds the wasm and compares it with `contract/WASM_SHA256`; it needs cargo-near 0.22 and the toolchain pinned in `contract/rust-toolchain.toml`, and a cold build takes 20 minutes or more. [CI](.github/workflows/ci.yml) runs it on Linux and reports the hash it got in the job summary.
+The one full-access key is on the gas account, not on the game: it adds relay keys and refills the pool, and it is not in the repository. `contract/build.sh --check` rebuilds the wasm and compares it with `contract/WASM_SHA256`, and `python3 contract/compare-wasm.py contract/target/near/lantern_row.wasm --account lantern-row.testnet` compares it with the code on chain, section by section; they need cargo-near 0.22 and the toolchain pinned in `contract/rust-toolchain.toml`, and a cold build takes 20 minutes or more. On macOS x86_64 the rebuild is byte-identical to the chain. [CI](.github/workflows/ci.yml) repeats it on every push: on macOS x86_64 it must be byte-identical to the code on chain, on Linux and macOS arm64 it reports where the bytes differ. Details: [Rebuilding the deployed wasm](README.md#rebuilding-the-deployed-wasm).
 
 ## 2. Play it (three minutes)
 

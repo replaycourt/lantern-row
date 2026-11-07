@@ -9,6 +9,8 @@
 # paths (/cargo/registry/..., /lantern-row/...) instead of machine-specific ones. cargo-near takes
 # RUSTFLAGS only through `--env` and appends `--cfg near` itself, so RUSTFLAGS and
 # CARGO_ENCODED_RUSTFLAGS are unset here (the latter would make cargo drop `--cfg near`).
+# It also pins the host triple that cargo hashes (see "Host pin" below); it sets RUSTC_WRAPPER for
+# that and replaces any wrapper set before.
 #
 # The build fails if `strings` finds /Users/, /home/ or the current user name in the wasm.
 # Output: $CARGO_TARGET_DIR/near/lantern_row.wasm (default target/near/lantern_row.wasm).
@@ -50,6 +52,36 @@ FLAGS="$FLAGS --remap-path-prefix=$CARGO_HOME_DIR=/cargo"
 unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS
 cd "$HERE"
 export CARGO_TARGET_DIR=$TARGET_DIR
+
+# Host pin. cargo mixes the `host:` line of `rustc -vV` into the -C metadata of every unit it builds
+# for the host (proc macros, build scripts) and, through the dependency graph, into the crate hashes
+# of the wasm's own crates (rust-lang/cargo#8140). Those hashes decide symbol names, and with them the
+# order of functions, imports and data in the wasm: on one and the same machine, reporting another
+# host changes the code section. build.sh therefore runs rustc through a small wrapper that reports
+# PINNED_HOST to `rustc -vV` and passes every other call through unchanged; proc macros and build
+# scripts still run natively. The default is the host the deployed wasm was built on; set
+# PINNED_HOST to another triple to see what the host line alone changes.
+PINNED_HOST=${PINNED_HOST:-x86_64-apple-darwin}
+case "$PINNED_HOST" in
+  *[!a-z0-9_.-]*|"") echo "ERROR: PINNED_HOST must be a target triple" >&2; exit 64 ;;
+esac
+export PINNED_HOST
+REAL_HOST=$(rustc -vV | sed -n 's/^host: //p')
+WRAPPER=$TARGET_DIR/rustc-pinned-host.sh
+cat >"$WRAPPER" <<'EOF'
+#!/bin/sh
+# Written by contract/build.sh: report $PINNED_HOST as the host to `rustc -vV`, pass the rest through.
+if [ $# -eq 2 ] && [ "$2" = "-vV" ]; then
+  out=$("$1" -vV) || exit $?
+  printf '%s\n' "$out" | sed "s/^host: .*/host: $PINNED_HOST/"
+  exit 0
+fi
+exec "$@"
+EOF
+chmod +x "$WRAPPER"
+export RUSTC_WRAPPER=$WRAPPER
+echo "host pin: cargo sees host \`$PINNED_HOST\` (this machine: \`$REAL_HOST\`)" >&2
+
 cargo near build non-reproducible-wasm --locked --env "RUSTFLAGS=$FLAGS" --out-dir "$OUT_DIR" >&2
 
 [ -f "$WASM" ] || { echo "ERROR: $WASM was not built" >&2; exit 1; }

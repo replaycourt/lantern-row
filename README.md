@@ -104,7 +104,21 @@ node scripts/e2e-browser.mjs --url http://127.0.0.1:8765/web/ --nights 10 --out 
 
 The last run and its transactions are in [docs/testnet-run.md](docs/testnet-run.md).
 
-**Contract.** `contract/` holds the Rust source, tests and economy simulation. `contract/build.sh --check` rebuilds the wasm with the toolchain pinned in `contract/rust-toolchain.toml` and cargo-near 0.22 and compares its sha256 with `contract/WASM_SHA256`, the code hash on chain. A cold build took 22 minutes on a 4-core laptop. It reproduced the hash on macOS (x86_64); CI repeats the build on Linux and writes in its job summary whether the hash matches there too. [SPEC.md](SPEC.md) has every rule, number and the full API; [docs/ECONOMY.md](docs/ECONOMY.md) has the simulation evidence.
+**Contract.** `contract/` holds the Rust source, tests and economy simulation. `contract/build.sh --check` rebuilds the wasm with the toolchain pinned in `contract/rust-toolchain.toml` and cargo-near 0.22 and compares its sha256 with `contract/WASM_SHA256`, the code hash on chain. A cold build took 22 minutes on a 4-core laptop. It reproduced the hash on macOS (x86_64); `python3 contract/compare-wasm.py contract/target/near/lantern_row.wasm --account lantern-row.testnet` compares the result with the code on chain, section by section. CI repeats the rebuild on every push; what it proves where is below. [SPEC.md](SPEC.md) has every rule, number and the full API; [docs/ECONOMY.md](docs/ECONOMY.md) has the simulation evidence.
+
+### Rebuilding the deployed wasm
+
+`contract/WASM_SHA256` is a number written next to the source; on its own it proves nothing about it. The evidence is a rebuild that gives the bytes the chain holds. `contract/compare-wasm.py` (Python standard library only) fetches the deployed code with the RPC `view_code` query, checks it against the chain's code hash and compares it with a local wasm section by section; it exits 0 only if the two are byte-identical and otherwise names the sections, function bodies and data byte ranges that differ.
+
+| Where | Result |
+|---|---|
+| macOS 15 x86_64 (a 4-core Intel Mac), cold build into a fresh target directory | byte-identical to the code on chain |
+| CI job `wasm` on GitHub's `macos-15-intel`, every push | must be byte-identical to the code it reads from the chain, or the run fails |
+| CI job `wasm` on `ubuntu-latest` (Linux x86_64) and `macos-15` (arm64) | reported in the job summary with the section comparison, the wasm uploaded as an artifact; a difference does not fail the run |
+
+**Why Linux differed, and what the host pin fixes.** Before the pin, CI built `39dba67d…` on Linux, not the deployed `1be4c4d2…`. One cause is cargo, not the source: cargo hashes the `host:` line of `rustc -vV` into the `-C metadata` of every proc macro and build script and mixes those hashes into the crate hashes of everything that depends on them ([rust-lang/cargo#8140](https://github.com/rust-lang/cargo/issues/8140)), and rustc lays out the code by the resulting symbol names. On the same Mac, `PINNED_HOST=x86_64-unknown-linux-gnu contract/build.sh --check`, which only tells cargo it runs on Linux, gives `782b0bfd…`: 813 functions instead of 817, only 218 function bodies identical at the same position, imports, element table and data in another order, the embedded ABI unchanged. `contract/build.sh` now pins the host cargo sees to `x86_64-apple-darwin`, the deployed build's, with a small `RUSTC_WRAPPER` that rewrites that one line of `rustc -vV`; proc macros and build scripts still run natively, and the deployed code stays as it is.
+
+**What is not explained.** The host line does not account for all of the Linux difference: the Mac build that reports Linux to cargo still differs from CI's Linux hash. The rest lies in the Linux builds of the tools (rustc with its LLVM and wasm linker, or cargo-near with its built-in wasm-opt pass and ABI extraction); which one could not be narrowed down without a Linux machine. CI now uploads the Linux wasm and prints its section comparison. Until a Linux run comes out byte-identical, the rebuild is established on macOS x86_64 only. The build uses cargo-near's `non-reproducible-wasm` mode with pinned inputs (Rust 1.95.0, the cargo-near 0.22.0 release binary, `Cargo.lock`), not its Docker-based reproducible mode, so the contract's NEP-330 metadata says `build_info: null`. Windows is untested.
 
 ## The games prompt, point by point
 
