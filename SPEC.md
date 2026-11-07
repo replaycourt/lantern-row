@@ -105,7 +105,7 @@ Rolled from `env::random_seed()` hashed with the night number. The next event is
 
 A stall is a NEP-171 token: core, NEP-177 metadata, NEP-178 approvals, NEP-181 enumeration, NEP-199 payouts, and NEP-297 events. Its id is the stall id as a string.
 
-- **The token is the account.** Money, stock, prices, reputation, spot and size are stored under the token id. `nft_transfer` changes the owner and nothing else, apart from clearing the approvals and any listing.
+- **Everything the stall owns travels with the token.** Money, stock, prices, reputation, spot and size are stored in the game contract under the token id (not in a separate NEAR account). `nft_transfer` changes the owner and nothing else, apart from clearing the approvals and any listing.
 - **Dynamic metadata.** `nft_token` computes title, description, an SVG picture (a data URI with a matching `media_hash`, one lantern per size, brighter with reputation) and `extra` (the full stall view as JSON) from the live state.
 - **Founder royalty, in NEAR.** `nft_payout` and `nft_transfer_payout` give whoever minted the stall 5% of a marketplace sale.
 - **Sale on the row, in coin.** `list` puts a stall up at an asking price. `buy_stall` pays from one of the buyer's stalls and moves the token to the buyer's account: 5% tax to the Treasury, 5% royalty to the founder's purse, the rest to the seller's purse.

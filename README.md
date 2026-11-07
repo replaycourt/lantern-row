@@ -55,7 +55,7 @@ curl -s https://test.rpc.fastnear.com -H 'Content-Type: application/json' -d '{"
 
 ## How to play
 
-**Watch first, if you like.** The title screen replays the latest nights from the chain, with a ticker of real sales and refusals; *Watch the row first* clears the screen so you can drag along the street and tap any stall for its prices and why. Nothing is sent. If nobody has played for a while, the title says so: the contract only moves when someone calls `advance_night`, and the first player action catches up the missed nights, up to 30 at once.
+**Watch first, if you like.** The title screen replays the latest nights from the chain, with a ticker of real sales and refusals; *Watch the row first* clears the screen so you can drag along the street and tap any stall for its prices and why, while a board ranks every stall by its takings that night. Nothing is sent. If nobody has played for a while, the title says so: the contract only moves when someone calls `advance_night`, and the first player action catches up the missed nights, up to 30 at once.
 
 1. **Tap *Open your stall*.** See a stall with your name on it appear on the street, with 3,000 coin inside. No wallet, no sign-up: your browser made a key, and that key owns the stall.
 2. **Tap *Restock*.** See tea, oil and dumplings land on your counter, bought from the Dock at tonight's prices and priced to sell. Each card says in a sentence how many villagers want that good tonight, about how many will buy at your price and what the cheapest rival asks; nudge a price with − and + and watch it change. Tap a card for the whole story.
@@ -72,7 +72,7 @@ Two minutes is enough to learn it. The merchants are the thing to beat: they rep
 ## Why NEAR
 
 - **An unpatchable shared world.** The contract account has no access keys. Nobody, including its author, can change a rule, mint coin or move a stall. 1,000,000 coin existed at founding and `audit()` shows the same total every night since. The economy keeps running without a developer: villagers earn wages, merchants restock from their own money, rent and tax flow back to the Treasury.
-- **NFTs that hold money and stock.** A stall is a NEP-171 token (metadata, approvals, enumeration, payouts), and the token *is* the account: coin, goods, prices, reputation and spot are stored under the token id. Transfer it, and all of it goes along. Its picture and description are computed from the live stall. The founder gets a 5% royalty on every resale, on the row in coin and through `nft_payout` in NEAR.
+- **NFTs that hold money and stock.** A stall is a NEP-171 token (metadata, approvals, enumeration, payouts), and everything the stall owns travels with it: coin, goods, prices, reputation and spot are stored in the game contract under the token id (not in a separate NEAR sub-account). Transfer it, and all of it goes along. The coin is the game's play money, not a NEAR token. Its picture and description are computed from the live stall. The founder gets a 5% royalty on every resale: on the row in coin, and through `nft_payout` for a sale in NEAR on a marketplace (tested in `contract/tests/nft.rs`; no NEAR sale has happened on testnet yet).
 - **No-wallet play through scoped keys.** The browser's Ed25519 key signs `lantern-row:v1:<contract>:<nonce>:<actions>`; a pool of public function-call keys on a gas account relays it to `act`, which checks the signature. The relay keys can only call `act` and `advance_night`, so they cannot change anything a player did not sign. Players never see a transaction, a seed phrase or a gas fee, and a small *Proof* drawer shows judges the account, the token and every transaction hash.
 - **Cheap enough for a 20-second night.** An `act` with ten actions burns under 3 Tgas; the worst-case `advance_night` with a full row and 30 nights of catch-up burns 15 Tgas. Playing clients call `advance_night` themselves when a night is due (a page that only watches never does), so the town is as alive as its players. During judging, a keeper in GitHub Actions also ends due nights every five minutes, beside five labelled house bots.
 
@@ -104,6 +104,22 @@ node scripts/e2e-browser.mjs --url http://127.0.0.1:8765/web/ --nights 10 --out 
 The last run and its transactions are in [docs/testnet-run.md](docs/testnet-run.md).
 
 **Contract.** `contract/` holds the Rust source, tests and economy simulation. `contract/build.sh --check` rebuilds the wasm with the toolchain pinned in `contract/rust-toolchain.toml` and cargo-near 0.22 and compares its sha256 with `contract/WASM_SHA256`, the code hash on chain. A cold build took 22 minutes on a 4-core laptop. It reproduced the hash on macOS (x86_64); CI repeats the build on Linux and writes in its job summary whether the hash matches there too. [SPEC.md](SPEC.md) has every rule, number and the full API; [docs/ECONOMY.md](docs/ECONOMY.md) has the simulation evidence.
+
+## The games prompt, point by point
+
+The track's [prompt](https://github.com/nearai/near-hackathon-prompt-examples/blob/main/tracks/09-games.md) asks for a market town with merchant agents. What Lantern Row has, and what it does not:
+
+| The prompt asks for | Lantern Row | Where |
+|---|---|---|
+| A market town where players trade with NPC merchants | A night market: players run stalls next to six merchant NPCs, and twelve villagers with wages and needs buy from whoever offers the better deal | `contract/src/night.rs` |
+| Each merchant has its own wallet and inventory and prices from stock and demand | Each merchant's stall holds its own coin and goods. Every night it raises a price that sold out or sold well, cuts one that villagers walked away from, keeps a margin over the Dock, and restocks from its own coin | `run_merchants` in `contract/src/night.rs`, numbers in `contract/src/config.rs` |
+| Flood the market and the price falls | Undercut a good and the villagers refuse the merchants' price, so the merchants cut it night after night; buying a good at the Dock heats its price there | `run_merchants`, `dock_marginal` in `contract/src/market.rs` |
+| A broke merchant closes until someone invests | **Not built.** The Treasury props a merchant up below 1,500 coin so the row never goes dark. Player stalls that stop trading lose their spot | `MERCHANT_RELIEF` in `contract/src/config.rs` |
+| Items as NEP-245 multi tokens | **Not built.** Goods are counters inside each stall; the stall itself is a NEP-171 token | `contract/src/nft.rs` |
+| Social or email login; no seed phrase, wallet popup or gas prompt | No login at all: the browser makes a key and public relay keys pay the gas. No seed phrase, popup or gas prompt anywhere in the loop | `web/js/near.js`, `act` in `contract/src/lib.rs` |
+| Merchant pricing rules in one readable file, reasoning in a tooltip | One function with its numbers beside it; tap a merchant's stall to see each price with its reason ("villagers walked away, price cut") | `run_merchants`, `NOTE_NAMES` in `contract/src/config.rs` |
+| A fast-forward mode | **Not in the page.** The economy simulation runs the contract's own code for 1,500 nights (`cargo test`), with the results in [docs/ECONOMY.md](docs/ECONOMY.md) | `contract/tests/economy_sim.rs` |
+| The loop at 30 seconds, 5 minutes, one session | Every 20-second night villagers walk the row and buy; every few minutes you restock, reprice and make tonight's call; over a session you grow the stall, move up the row and pass the next merchant | [How to play](#how-to-play) |
 
 ## What is real and what is not
 
