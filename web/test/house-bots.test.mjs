@@ -53,7 +53,7 @@ test('the title counts house bots apart from player stalls', () => {
   const line = (w) => L.titleLine(w, { goods }).replaceAll(' ', ' ')
   assert.equal(line(world([kettle, honey])), 'Night 41 · no villagers shopping · 1 merchant · 1 player stall')
   assert.equal(line(world([kettle, honey, botStall(), botStall({ id: 31, owner: HOUSE_BOTS[1].account })])), 'Night 41 · no villagers shopping · 1 merchant · 1 player stall · 2 house bots')
-  assert.equal(line(world([kettle, botStall()])), 'Night 41 · no villagers shopping · 1 merchant · no player stalls yet · 1 house bot')
+  assert.equal(line(world([kettle, botStall()])), 'Night 41 · no villagers shopping · 1 merchant · 1 house bot')
 })
 
 test('ranks, the stall peek and the deed card tag house-bot stalls', () => {

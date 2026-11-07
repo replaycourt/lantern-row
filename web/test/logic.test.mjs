@@ -259,7 +259,7 @@ test('title line counts the live street', () => {
   const content = { ...ines, wallet: 0, unmet: [0, 0, 0, 0, 0] }
   assert.equal(line({ ...quiet, villagers: [ansel, content] }), 'Night 41 · 1 villager shopping · 2 merchants · 1 player stall')
   assert.equal(line({ ...world, villagers: [ansel, content] }), 'Night 41 · 2 villagers shopping · 2 merchants · 1 player stall')
-  assert.equal(line({ ...quiet, night: 1200, row: [kettle], villagers: [content] }), 'Night 1,200 · no villagers shopping · 1 merchant · no player stalls yet')
+  assert.equal(line({ ...quiet, night: 1200, row: [kettle], villagers: [content] }), 'Night 1,200 · no villagers shopping · 1 merchant')
   assert.equal(line({ ...quiet, row: [kettle, me, { ...me, id: 15 }] }), 'Night 41 · 2 villagers shopping · 1 merchant · 2 player stalls')
 })
 

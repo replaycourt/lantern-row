@@ -858,6 +858,7 @@ function startReplay() {
         continue
       }
       U.$('watch-line').textContent = `Replaying night ${L.fmt(log.night)} from the chain · tap a stall to see its prices`
+      U.$('takings').innerHTML = U.takingsHtml(L.nightTakings(S.world, log), log.night)
       await scene.playNight(log, { duration: reduced ? 6 : 22, reasonFor: reasonsFor(log, S.world) })
       if (!W.on || W.token !== token) break
       await sleep(1200)

@@ -375,7 +375,8 @@ export function forecastLine(world, cfg) {
 
 /**
  * The title screen's line about the street, all from the live world: the night, the villagers who
- * want something tonight (worked out as the contract does), the merchants and the player stalls.
+ * want something tonight (worked out as the contract does), the merchants, and the player stalls and
+ * house bots when there are any.
  * Non-breaking spaces keep each part whole, so a narrow screen wraps only after a dot.
  */
 export function titleLine(world, cfg) {
@@ -388,11 +389,32 @@ export function titleLine(world, cfg) {
     `Night ${fmt(world.night)}`,
     shoppers ? `${count(shoppers, 'villager')} shopping` : 'no villagers shopping',
     count(merchants, 'merchant'),
-    players ? count(players, 'player stall') : 'no player stalls yet',
+    ...(players ? [count(players, 'player stall')] : []),
     ...(bots ? [count(bots, 'house bot')] : []),
   ]
     .map((part) => part.replaceAll(' ', '\u00a0'))
     .join('\u00a0· ')
+}
+
+/**
+ * One night on the row, stall by stall, best takings first: what each stall on the row sold, for
+ * how much, and how often a villager found it too dear. Unlike net worth, where the merchants start
+ * far ahead, a new stall can top this list on its first night.
+ */
+export function nightTakings(world, log) {
+  const by = new Map((world?.row ?? []).map((s) => [s.id, { id: s.id, name: s.name, npc: s.npc, bot: isHouseBot(s), sales: 0, takings: 0, refusals: 0 }]))
+  for (const [, stall, , price] of log?.sales ?? []) {
+    const r = by.get(stall)
+    if (r) {
+      r.sales++
+      r.takings += price
+    }
+  }
+  for (const [, stall] of log?.refusals ?? []) {
+    const r = by.get(stall)
+    if (r) r.refusals++
+  }
+  return [...by.values()].sort((a, b) => b.takings - a.takings || a.id - b.id)
 }
 
 // ---- the walk, from a NightLog --------------------------------------------------------------------

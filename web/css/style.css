@@ -58,6 +58,17 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--amber); out
 .watch-info { flex: 0 1 auto; background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--line); border-radius: 14px; padding: 8px 14px; display: flex; flex-direction: column; min-width: 0; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3); }
 .watch-info b { color: #ffe08a; font-size: 0.95rem; }
 .watch-info span { font-size: 0.78rem; opacity: 0.8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.takings { display: none; position: absolute; left: 12px; top: 74px; z-index: 9; width: 290px; max-height: calc(100vh - 140px); overflow: auto; background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3); font-size: 0.82rem; }
+body.watching .takings:not(:empty) { display: block; }
+.takings h3 { margin: 0 0 6px; font-size: 0.85rem; color: #ffe08a; }
+.takings ol { list-style: none; margin: 0; padding: 0; }
+.takings li { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; align-items: baseline; padding: 3px 0; border-top: 1px solid var(--line); }
+.takings li:first-child { border-top: 0; }
+.takings .rank { opacity: 0.6; font-variant-numeric: tabular-nums; }
+.takings .num { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.takings small { font-weight: 400; opacity: 0.7; }
+.takings li.player .who { color: #ffe08a; }
+.takings p { margin: 8px 0 0; font-size: 0.74rem; opacity: 0.75; }
 .watch-actions { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
 .watch-actions .small.primary { padding: 12px 18px; font-size: 0.95rem; box-shadow: 0 4px 0 #a24a1e; white-space: nowrap; }
 .ticker { position: absolute; left: 0; right: 0; bottom: 0; z-index: 21; height: 36px; display: flex; align-items: center; background: rgba(10, 8, 30, 0.82); border-top: 1px solid var(--line); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); font-size: 0.84rem; padding-bottom: env(safe-area-inset-bottom); }
@@ -367,6 +378,8 @@ body.watching .toast { bottom: auto; top: 76px; }
   .watch-info span { font-size: 0.7rem; }
   .watch-actions .small.primary { padding: 10px 12px; font-size: 0.85rem; }
   .watchbar { padding: 8px; gap: 6px; }
+  .takings { top: 64px; left: 8px; width: min(250px, 66vw); font-size: 0.74rem; padding: 8px 10px; }
+  .takings li:nth-child(n + 5), .takings p { display: none; }
   .watch-info { padding: 6px 10px; }
   .watch-info b { font-size: 0.85rem; }
   .ticker { font-size: 0.76rem; height: 32px; }

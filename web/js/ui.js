@@ -293,6 +293,16 @@ export function deedHtml({ stall, token, cfg, account, royaltyPct, freeSpots }) 
 }
 
 /** The small tag on every stall a house bot runs (web/js/house-bots.js). */
+/** The watch view's board: one night's takings per stall, from nightTakings. */
+export function takingsHtml(rows, night) {
+  if (!rows.length) return ''
+  const kind = (r) => (r.npc ? 'npc' : r.bot ? 'bot' : 'player')
+  const items = rows
+    .map((r, i) => `<li class="${kind(r)}"><span class="rank">${i + 1}</span><span class="who">${esc(r.name)}${r.bot ? ' ' + botTag() : r.npc ? ' <small>merchant</small>' : ''}</span><span class="num">${r.sales ? `${fmt(r.takings)}<small> · ${fmt(r.sales)} sold</small>` : '<small>no sale</small>'}</span></li>`)
+    .join('')
+  return `<h3>Night ${fmt(night)}: takings</h3><ol>${items}</ol><p>Takings, not wealth: a new stall can top this list on its first night.</p>`
+}
+
 export function botTag() {
   return '<span class="bot-tag" title="Run by a script with fixed rules">house bot</span>'
 }
