@@ -148,7 +148,7 @@ The track's [prompt](https://github.com/nearai/near-hackathon-prompt-examples/bl
 - **AI-generated code.** All code and documentation in this repository were written by an AI coding agent (Claude) from a human's game brief, during the hackathon window, and were not reviewed line by line by a human. The tests, the simulation, the testnet run and the end-to-end check are the evidence that it works. The contract has not been audited.
 - **Known limits** (randomness, griefing of licences, the account register, idle towns) are listed honestly in [SPEC.md section 14](SPEC.md#14-honest-limits).
 
-The same author also entered the independent project Bonfire, https://github.com/replaycourt/bonfire, in this hackathon.
+Lantern Row was built during NEAR HACKATHON but is not one of the author's submissions. The author's two entries are Bonfire, https://github.com/replaycourt/bonfire (memecoins), and Hat Tip, https://github.com/replaycourt/hat-tip (social).
 
 ## Credits
 
